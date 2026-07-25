@@ -55,62 +55,52 @@ tests/            офлайн-тести ядра (pytest, 30 шт.)
 
 ---
 
-## Встановлення
+## Встановлення та запуск (Windows — два кліки)
 
-```bash
-python -m venv .venv
-.venv\Scripts\activate                 # Windows
-pip install -r requirements.txt        # ядро + GUI + тести (офлайн)
-pip install -r requirements-hw.txt     # апаратне: pyadi-iio + pylibiio (для передачі)
-```
-Нативна бібліотека **libiio** має бути встановлена в системі. Для Linux:
-`apt install libiio0 libiio-utils`.
+**Головний інструмент — GUI.** Термінал для роботи не потрібен:
 
-Запускати CLI/GUI треба **з каталогу проєкту через `.venv`** (пакет не встановлений
-глобально): `.venv\Scripts\python.exe -m fpv_emulator.cli ...`.
+1. **`setup.bat`** — подвійний клік **один раз**. Створить оточення `.venv` і поставить
+   усе потрібне (numpy, PySide6, pyadi-iio…).
+2. **`run_gui.bat`** — подвійний клік, щоб **запустити GUI**. Відкриється головне
+   вікно (помилки старту, якщо є, покаже діалог).
+
+> Порада: правий клік на `run_gui.bat` → створити ярлик на робочому столі / закріпити
+> на панелі задач — і запуск буде в один клік.
+
+### GUI — що всередині
+
+Відкривається одразу з робочим профілем (color_bars, 20 MSPS, PAL50, backend
+`pluto`). Усе керується мишкою:
+- **Вихід:** backend (`pluto` / `soapy` для HackRF та ін.), URI/пристрій, кнопки
+  «Проба Pluto» і «Список SDR».
+- **Частота:** банд/канал або несуча вручну.
+- **Сигнал:** стандарт, патерн (прев'ю в кольорі), частота дискретизації, девіація.
+- **Потужність:** повзунок, **міняється в рантаймі** під час передачі.
+- **Режим:** ручна несуча або готовий сценарій; Старт/Стоп; журнал подій.
+
+Для передачі: оберіть backend `pluto` (або `soapy`), частоту → **Старт**.
 
 ---
 
-## Швидкий старт
+## Термінал (CLI) — лише для автоматизації
 
-### Проба апаратури
-```bash
-python -m fpv_emulator.cli probe --uri ip:192.168.2.1
-```
-Визначить чип (AD9363/AD9361) та реальні межі TX, і чи дістає 5.8 ГГц.
+GUI покриває щоденну роботу; CLI зручний для скриптів. Запуск — через `.venv`:
 
-### GUI
 ```bash
-python run_gui.py
-```
-За замовчуванням відкривається з робочим профілем (color_bars, 20 MSPS, PAL50,
-backend `pluto`). Живі регулятори: банд/канал або несуча, стандарт, патерн, fs,
-девіація, **повзунок потужності (міняється в рантаймі)**; прев'ю патерну в кольорі;
-Старт/Стоп; вибір сценарію; журнал подій.
-
-### Свіп по діапазонах
-```bash
-python -m fpv_emulator.cli tx --backend pluto --scenario sweep_ranges
-```
-Проходить задані діапазони з кроком, **15 с передача + 5 с пауза** на кожній частоті.
-Діапазони й крок задаються у файлі сценарію під ваш детектор.
-
-### Одиночна несуча / вручну
-```bash
-python -m fpv_emulator.cli tx --backend pluto --freq-mhz 1200 --pattern color_bars --gain 0
-python -m fpv_emulator.cli tx --backend pluto --channel R1 --pattern bars --standard NTSC60
+.venv\Scripts\python.exe -m fpv_emulator.cli probe
+.venv\Scripts\python.exe -m fpv_emulator.cli tx --backend pluto --scenario sweep_ranges
+.venv\Scripts\python.exe -m fpv_emulator.cli tx --backend pluto --freq-mhz 1200 --pattern color_bars --gain 0
+.venv\Scripts\python.exe -m fpv_emulator.cli gen --pattern color_bars --sample-rate 20e6 --out frame.iq
+.venv\Scripts\python.exe -m fpv_emulator.cli list-bands   # також list-patterns | list-scenarios | list-devices
 ```
 
-### Генерація у файл (без апаратури)
+Ручне встановлення (замість `setup.bat`):
 ```bash
-python -m fpv_emulator.cli gen --pattern color_bars --sample-rate 20e6 --out frame.iq
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt -r requirements-hw.txt
 ```
-`.iq` — interleaved int16 (GNU Radio / inspectrum), `.npy` — complex64.
-
-### Довідники
-```bash
-python -m fpv_emulator.cli list-bands | list-patterns | list-scenarios
-```
+Нативна **libiio** має бути в системі (Linux: `apt install libiio0 libiio-utils`).
 
 ---
 
