@@ -1,19 +1,20 @@
 """Composite (CVBS) analog video test-pattern generator.
 
-Формує один повний кадр композитного відео як дійсний baseband-сигнал у вольтах
-(діапазон приблизно [-0.3 .. +0.7] В, 1 Vpp). Кадр періодичний: конкатенація
-однакових кадрів безшовна, тому його зручно віддавати в циклічний TX-буфер Pluto.
+Builds one full composite video frame as a real baseband signal in volts
+(range roughly [-0.3 .. +0.7] V, 1 Vpp). The frame is periodic: concatenating
+identical frames is seamless, so it is convenient to feed into the cyclic TX
+buffer of the Pluto.
 
-Реалізовано прогресивний кадр із коректним таймінгом рядків (гориз. синхро,
-задня/передня площадки) та спрощеним вертикальним синхро-блоком. Саме частота
-рядків (15.625 кГц PAL / 15.734 кГц NTSC) та кадрова частота формують характерну
-сигнатуру аналогового FPV-відео, на яку реагує детектор.
+A progressive frame is produced with correct line timing (horizontal sync,
+back/front porch) and a simplified vertical sync block. It is exactly the line
+rate (15.625 kHz PAL / 15.734 kHz NTSC) together with the frame rate that form
+the characteristic signature of analog FPV video the detector reacts to.
 
-Спрощення (задокументовані навмисно):
-  * прогресивна розгортка (без чересрядкової) — кадрова/рядкова цятка збережені;
-  * вертикальне синхро — суцільний широкий імпульс без серрацій;
-  * без кольоровської піднесучої (луми достатньо для ЧМ-сигнатури); за бажання
-    можна ввімкнути burst через параметр color_burst.
+Deliberate simplifications:
+  * progressive scan (no interlace) — the frame/line "flicker" is preserved;
+  * vertical sync — one solid wide pulse without serrations;
+  * no color subcarrier (luma alone is enough for the FM signature); a burst
+    can be enabled on demand via the color_burst parameter.
 """
 from __future__ import annotations
 
@@ -22,6 +23,8 @@ from typing import Callable, Dict, List
 
 import numpy as np
 
+from .i18n import t
+
 
 # ---------------------------------------------------------------------------
 #  Video standard definitions
@@ -29,20 +32,20 @@ import numpy as np
 @dataclass(frozen=True)
 class VideoStandard:
     name: str
-    total_lines: int          # рядків на кадр (повний, з VBI)
-    active_lines: int         # видимих рядків
-    fps: float                # кадрів/с
-    line_us: float            # період рядка, мкс
-    sync_us: float            # тривалість горизонтального синхроімпульсу
+    total_lines: int          # lines per frame (full, including VBI)
+    active_lines: int         # visible lines
+    fps: float                # frames per second
+    line_us: float            # line period, us
+    sync_us: float            # horizontal sync pulse duration
     back_porch_us: float
     front_porch_us: float
-    vsync_lines: int          # рядків широкого вертикального синхро
-    # рівні в нормованих вольтах
+    vsync_lines: int          # lines of wide vertical sync
+    # levels in normalised volts
     sync_level: float = -0.30
     blank_level: float = 0.00
     black_level: float = 0.00
     white_level: float = 0.70
-    color_subcarrier_hz: float = 0.0   # 4.43 МГц PAL / 3.58 МГц NTSC, якщо burst
+    color_subcarrier_hz: float = 0.0   # 4.43 MHz PAL / 3.58 MHz NTSC, if burst
 
     @property
     def line_rate_hz(self) -> float:
@@ -53,12 +56,13 @@ class VideoStandard:
         return 1.0 / self.fps
 
 
-# Робочі стандарти — польові (прогресивні 288p/240p) з коректною частотою полів:
-# вертикальний синхро йде 50/60 Гц, як чекає монітор — виправляє зсув по вертикалі.
-# Проходять через той самий generate_composite (змінюються лише к-сть рядків і fps).
+# Working standards — field-based (progressive 288p/240p) with the correct field
+# rate: vertical sync runs at 50/60 Hz, as the monitor expects, which fixes the
+# vertical roll. They go through the same generate_composite (only the number of
+# lines and fps change).
 PAL50 = VideoStandard(
     name="PAL50",
-    total_lines=312,       # 312 рядків/поле * 64 мкс = 19.97 мс -> 50.08 Гц
+    total_lines=312,       # 312 lines/field * 64 us = 19.97 ms -> 50.08 Hz
     active_lines=288,
     fps=50.0,
     line_us=64.0,
@@ -71,7 +75,7 @@ PAL50 = VideoStandard(
 
 NTSC60 = VideoStandard(
     name="NTSC60",
-    total_lines=262,       # 262 * 63.556 мкс = 16.65 мс -> 60.06 Гц
+    total_lines=262,       # 262 * 63.556 us = 16.65 ms -> 60.06 Hz
     active_lines=240,
     fps=60000.0 / 1001.0,  # ~59.94
     line_us=63.556,
@@ -84,7 +88,7 @@ NTSC60 = VideoStandard(
 
 STANDARDS: Dict[str, VideoStandard] = {"PAL50": PAL50, "NTSC60": NTSC60}
 
-# застарілі імена зі старих конфігів -> робочі польові стандарти
+# legacy names from older configs -> working field standards
 _STANDARD_ALIASES = {"PAL": "PAL50", "NTSC": "NTSC60"}
 
 
@@ -92,23 +96,26 @@ def get_standard(name: str) -> VideoStandard:
     key = name.strip().upper()
     key = _STANDARD_ALIASES.get(key, key)
     if key not in STANDARDS:
-        raise KeyError(f"Невідомий стандарт '{name}'. Доступні: {list(STANDARDS)}")
+        raise KeyError(
+            t("Unknown standard '{name}'. Available: {list}",
+              name=name, list=list(STANDARDS))
+        )
     return STANDARDS[key]
 
 
 # ---------------------------------------------------------------------------
-#  Test patterns.  Кожен повертає 2D-масив луми active_lines x width у [0..1]
-#  (0 = чорний, 1 = білий).
+#  Test patterns.  Each returns a 2D luma array active_lines x width in [0..1]
+#  (0 = black, 1 = white).
 # ---------------------------------------------------------------------------
 def _pat_bars(h: int, w: int, steps: int = 8) -> np.ndarray:
-    """Вертикальні градаційні смуги 0..1 (різкі краї — багато ВЧ)."""
+    """Vertical grayscale bars 0..1 (sharp edges — plenty of HF)."""
     idx = (np.arange(w) * steps // w).clip(0, steps - 1)
     row = idx / (steps - 1)
     return np.tile(row, (h, 1))
 
 
 def _pat_smpte75(h: int, w: int) -> np.ndarray:
-    """Луми 75% color-bars (сірий, жовтий, блакитний, зелений, пурпур, черв., синій)."""
+    """Luma of 75% color bars (gray, yellow, cyan, green, magenta, red, blue)."""
     lumas = np.array([0.75, 0.69, 0.56, 0.48, 0.36, 0.28, 0.15])
     idx = (np.arange(w) * len(lumas) // w).clip(0, len(lumas) - 1)
     row = lumas[idx]
@@ -116,7 +123,7 @@ def _pat_smpte75(h: int, w: int) -> np.ndarray:
 
 
 def _pat_ramp(h: int, w: int) -> np.ndarray:
-    """Горизонтальний градієнт 0..1."""
+    """Horizontal gradient 0..1."""
     row = np.linspace(0.0, 1.0, w)
     return np.tile(row, (h, 1))
 
@@ -126,7 +133,7 @@ def _pat_crosshair(h: int, w: int) -> np.ndarray:
     t = max(1, w // 200)
     img[h // 2 - t:h // 2 + t, :] = 1.0
     img[:, w // 2 - t:w // 2 + t] = 1.0
-    # рамка
+    # frame border
     img[:t, :] = img[-t:, :] = 1.0
     img[:, :t] = img[:, -t:] = 1.0
     return img
@@ -149,13 +156,13 @@ def _pat_checker(h: int, w: int, n: int = 16) -> np.ndarray:
 
 
 def _pat_multiburst(h: int, w: int) -> np.ndarray:
-    """Пакети синусоїд зі зростаючою частотою — максимум ВЧ, найширша смуга.
-    Найкраще навантажує детектор за зайнятою смугою."""
+    """Sine bursts of increasing frequency — maximum HF, widest bandwidth.
+    Loads the detector hardest in terms of occupied bandwidth."""
     x = np.arange(w)
     seg = w // 6
     row = np.full(w, 0.5)
     for i in range(1, 6):
-        f = 0.02 * i               # відн. частота (циклів на семпл)
+        f = 0.02 * i               # relative frequency (cycles per sample)
         s0, s1 = i * seg, (i + 1) * seg
         row[s0:s1] = 0.5 + 0.5 * np.sin(2 * np.pi * f * (x[s0:s1] - s0))
     return np.tile(row, (h, 1))
@@ -180,14 +187,14 @@ _PATTERNS: Dict[str, Callable[[int, int], np.ndarray]] = {
 
 
 def list_patterns() -> List[str]:
-    """Люма-патерни (ч/б)."""
+    """Luma patterns (black and white)."""
     return list(_PATTERNS.keys())
 
 
 # ---------------------------------------------------------------------------
-#  Color test patterns → RGB [0..1] (H x W x 3).  Окремо від люма-патернів.
+#  Color test patterns → RGB [0..1] (H x W x 3).  Separate from luma patterns.
 # ---------------------------------------------------------------------------
-# 8 стовпчиків EBU/SMPTE: білий, жовтий, блакитний, зелений, пурпур, черв., синій, чорний
+# 8 EBU/SMPTE columns: white, yellow, cyan, green, magenta, red, blue, black
 _BARS_RGB = np.array([
     [1, 1, 1], [1, 1, 0], [0, 1, 1], [0, 1, 0],
     [1, 0, 1], [1, 0, 0], [0, 0, 1], [0, 0, 0],
@@ -227,12 +234,12 @@ def _rgb_to_yuv(rgb: np.ndarray):
 
 
 def render_pattern_image(pattern: str, height: int = 288, width: int = 384) -> np.ndarray:
-    """Прев'ю: люма-патерн → 2D [0..1]; кольоровий → RGB [0..1] (HxWx3)."""
+    """Preview: luma pattern → 2D [0..1]; color pattern → RGB [0..1] (HxWx3)."""
     if pattern in _COLOR_PATTERNS:
         return np.clip(_COLOR_PATTERNS[pattern](height, width), 0.0, 1.0)
     if pattern in _PATTERNS:
         return np.clip(_PATTERNS[pattern](height, width), 0.0, 1.0)
-    raise KeyError(f"Невідомий патерн '{pattern}'")
+    raise KeyError(t("Unknown pattern '{pattern}'", pattern=pattern))
 
 
 # ---------------------------------------------------------------------------
@@ -248,19 +255,23 @@ def generate_composite(
     fs: float,
     color_burst: bool = False,
 ) -> np.ndarray:
-    """Повертає один кадр композитного відео (float32, вольти).
+    """Return one frame of composite video (float32, volts).
 
-    Довжина = samples_per_line * total_lines, тому кадр безшовно тайлиться в
-    циклічному буфері.
+    Length = samples_per_line * total_lines, so the frame tiles seamlessly in a
+    cyclic buffer.
     """
     if pattern not in _PATTERNS:
-        raise KeyError(f"Невідомий патерн '{pattern}'. Доступні: {list_patterns()}")
+        raise KeyError(
+            t("Unknown pattern '{pattern}'. Available: {list}",
+              pattern=pattern, list=list_patterns())
+        )
 
     n_line = _samples(std.line_us, fs)
     if n_line < 16:
         raise ValueError(
-            f"Замала частота дискретизації {fs/1e6:.2f} MSPS для {std.name}: "
-            f"{n_line} семплів на рядок. Підніміть fs."
+            t("Sample rate {fs} MSPS is too low for {std}: {n} samples per line. "
+              "Increase fs.",
+              fs=f"{fs/1e6:.2f}", std=std.name, n=n_line)
         )
     n_sync = _samples(std.sync_us, fs)
     n_bp = _samples(std.back_porch_us, fs)
@@ -268,15 +279,16 @@ def generate_composite(
     n_active = n_line - n_sync - n_bp - n_fp
     if n_active < 8:
         raise ValueError(
-            f"Замало семплів на активну частину рядка ({n_active}). Підніміть fs."
+            t("Too few samples for the active part of the line ({n}). Increase fs.",
+              n=n_active)
         )
 
-    # згенерувати зображення патерну для активних рядків
+    # render the pattern image for the active lines
     img = _PATTERNS[pattern](std.active_lines, n_active)
     img = np.clip(img, 0.0, 1.0)
     active_pixels = std.black_level + img * (std.white_level - std.black_level)
 
-    # шаблон одного видимого рядка: [sync][back porch][active][front porch]
+    # template of a single visible line: [sync][back porch][active][front porch]
     def visible_line(active_row: np.ndarray) -> np.ndarray:
         line = np.empty(n_line, dtype=np.float32)
         line[:n_sync] = std.sync_level
@@ -287,29 +299,29 @@ def generate_composite(
             _add_burst(line, n_sync, n_bp, std, fs)
         return line
 
-    # порожній (blank) рядок VBI — синхро + площадки, активна частина = чорний
+    # empty (blank) VBI line — sync + porches, active part = black
     black_row = np.full(n_active, std.black_level, dtype=np.float32)
     blank_line = visible_line(black_row)
 
-    # рядок вертикального синхро — суцільний широкий імпульс на рівні sync
+    # vertical sync line — one solid wide pulse at the sync level
     vsync_line = np.full(n_line, std.sync_level, dtype=np.float32)
 
     vbi_lines = std.total_lines - std.active_lines
     vbi_blank = max(0, vbi_lines - std.vsync_lines)
 
     lines: List[np.ndarray] = []
-    # вертикальний синхро-блок
+    # vertical sync block
     for _ in range(std.vsync_lines):
         lines.append(vsync_line)
-    # решта VBI — порожні рядки
+    # the rest of the VBI — blank lines
     for _ in range(vbi_blank):
         lines.append(blank_line)
-    # активні рядки з патерном
+    # active lines carrying the pattern
     for r in range(std.active_lines):
         lines.append(visible_line(active_pixels[r]))
 
     frame = np.concatenate(lines).astype(np.float32)
-    # страхуємось на кратність (округлення таймінгу могло дати ± кілька семплів)
+    # guard the exact length (timing rounding may add/remove a few samples)
     expected = n_line * std.total_lines
     if frame.size != expected:
         frame = frame[:expected] if frame.size > expected else np.pad(
@@ -319,79 +331,89 @@ def generate_composite(
 
 
 def _add_burst(line: np.ndarray, n_sync: int, n_bp: int, std: VideoStandard, fs: float) -> None:
-    """Додати кілька циклів кольорової піднесучої на задній площадці (burst)."""
-    n_burst = min(n_bp // 2, _samples(2.25, fs))  # ~2.25 мкс burst
+    """Add a few cycles of the color subcarrier on the back porch (burst)."""
+    n_burst = min(n_bp // 2, _samples(2.25, fs))  # ~2.25 us burst
     start = n_sync + max(1, n_bp // 6)
     t = np.arange(n_burst) / fs
     line[start:start + n_burst] += 0.15 * np.sin(2 * np.pi * std.color_subcarrier_hz * t)
 
 
-# амплітуди хроми/burst у композитних «вольтах»
+# chroma/burst amplitudes in composite "volts"
 _CHROMA_GAIN = 0.5
 _BURST_AMP = 0.15
 
 
 def generate_composite_color(pattern: str, std: VideoStandard, fs: float) -> np.ndarray:
-    """Повертає один кадр КОЛЬОРОВОГО композиту (float32, вольти).
+    """Return one frame of COLOR composite video (float32, volts).
 
-    Люма + чрома-піднесуча (U/V QAM) + кольоровий burst на задній площадці.
-    Для PAL фаза V чергується по рядках. Структура рядків/синхро — як у
-    generate_composite; luma-функції не зачіпаються.
+    Luma + chroma subcarrier (U/V QAM) + color burst on the back porch. For PAL
+    the V phase alternates line by line. The line/sync structure is the same as
+    in generate_composite; the luma functions are left untouched.
 
-    Потрібна fs >= ~2.2*піднесуча (для PAL 4.43 МГц -> fs >= ~10 МГц), інакше
-    піднесуча завернеться. Рекомендовано fs 13–15 MSPS.
+    Requires fs >= ~2.2*subcarrier (for PAL 4.43 MHz -> fs >= ~10 MHz), otherwise
+    the subcarrier aliases. fs of 13-15 MSPS is recommended.
     """
     import warnings
 
     if pattern not in _COLOR_PATTERNS:
-        raise KeyError(f"Невідомий кольоровий патерн '{pattern}'. Доступні: {list_color_patterns()}")
+        raise KeyError(
+            t("Unknown color pattern '{pattern}'. Available: {list}",
+              pattern=pattern, list=list_color_patterns())
+        )
     if std.color_subcarrier_hz <= 0:
-        raise ValueError(f"Стандарт {std.name} не має кольорової піднесучої")
+        raise ValueError(t("Standard {std} has no color subcarrier", std=std.name))
     if fs < 2.2 * std.color_subcarrier_hz:
         warnings.warn(
-            f"Замала fs {fs/1e6:.1f} MSPS для кольору {std.name}: піднесуча "
-            f"{std.color_subcarrier_hz/1e6:.2f} МГц завернеться. Підніміть fs до "
-            f">= {2.2*std.color_subcarrier_hz/1e6:.1f} MSPS.",
+            t("Sample rate {fs} MSPS is too low for color {std}: the {sc} MHz "
+              "subcarrier will alias. Increase fs to >= {min_fs} MSPS.",
+              fs=f"{fs/1e6:.1f}", std=std.name,
+              sc=f"{std.color_subcarrier_hz/1e6:.2f}",
+              min_fs=f"{2.2*std.color_subcarrier_hz/1e6:.1f}"),
             stacklevel=2,
         )
 
     n_line = _samples(std.line_us, fs)
     if n_line < 16:
-        raise ValueError(f"Замала fs {fs/1e6:.2f} MSPS: {n_line} семплів/рядок.")
+        raise ValueError(
+            t("Sample rate {fs} MSPS is too low: {n} samples/line.",
+              fs=f"{fs/1e6:.2f}", n=n_line)
+        )
     n_sync = _samples(std.sync_us, fs)
     n_bp = _samples(std.back_porch_us, fs)
     n_fp = _samples(std.front_porch_us, fs)
     n_active = n_line - n_sync - n_bp - n_fp
     if n_active < 8:
-        raise ValueError(f"Замало семплів на активну частину рядка ({n_active}).")
+        raise ValueError(
+            t("Too few samples for the active part of the line ({n}).", n=n_active)
+        )
 
     N = n_line * std.total_lines
     field = np.empty(N, dtype=np.float32)
 
-    # неперервна піднесуча по всьому кадру (спільна фаза для burst і хроми)
+    # continuous subcarrier across the whole frame (shared phase for burst and chroma)
     idx = np.arange(N)
     omega = 2.0 * np.pi * std.color_subcarrier_hz / fs
     sc_sin = np.sin(omega * idx).astype(np.float32)
     sc_cos = np.cos(omega * idx).astype(np.float32)
 
     is_pal = std.name.upper().startswith("PAL")
-    n_burst = min(n_bp // 2, int(round(10.0 / std.color_subcarrier_hz * fs)))  # ~10 циклів
+    n_burst = min(n_bp // 2, int(round(10.0 / std.color_subcarrier_hz * fs)))  # ~10 cycles
     burst_rel = n_sync + max(1, _samples(0.9, fs))
 
-    # активне зображення -> Y/U/V
+    # active image -> Y/U/V
     rgb = np.clip(_COLOR_PATTERNS[pattern](std.active_lines, n_active), 0.0, 1.0)
     Y, U, V = _rgb_to_yuv(rgb)
     active_luma = std.black_level + Y * (std.white_level - std.black_level)
 
-    la0, la1 = n_sync + n_bp, n_sync + n_bp + n_active   # межі активної частини в рядку
+    la0, la1 = n_sync + n_bp, n_sync + n_bp + n_active   # bounds of the active part of a line
 
     pos = 0
-    # вертикальний синхро-блок (суцільний, як у робочій версії)
+    # vertical sync block (solid, as in the working version)
     vsync_line = np.full(n_line, std.sync_level, dtype=np.float32)
     for _ in range(std.vsync_lines):
         field[pos:pos + n_line] = vsync_line
         pos += n_line
-    # порожні рядки VBI
+    # blank VBI lines
     vbi_blank = max(0, (std.total_lines - std.active_lines) - std.vsync_lines)
     blank_line = np.empty(n_line, dtype=np.float32)
     blank_line[:n_sync] = std.sync_level
@@ -399,7 +421,7 @@ def generate_composite_color(pattern: str, std: VideoStandard, fs: float) -> np.
     for _ in range(vbi_blank):
         field[pos:pos + n_line] = blank_line
         pos += n_line
-    # активні рядки: люма + чрома + burst
+    # active lines: luma + chroma + burst
     for r in range(std.active_lines):
         ln = np.empty(n_line, dtype=np.float32)
         ln[:n_sync] = std.sync_level

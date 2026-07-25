@@ -1,10 +1,11 @@
 """Scenario engine — drives a TX sink over time.
 
-Сценарій керує приймачем IQ у часі: перебір каналів (свіп), рамп потужності,
-кілька «дронів» одночасно, статична несуча. Рушій крокує з перевіркою stop-події,
-тож однаково працює в CLI (головний потік) і GUI (окремий QThread).
+A scenario drives the IQ sink over time: channel hopping (sweep), a power ramp,
+several "drones" at once, or a static carrier. The engine steps forward while
+checking the stop event, so it works the same in the CLI (main thread) and in the
+GUI (a separate QThread).
 
-Схема сценарію (YAML) — див. config/scenarios/*.yaml та README.
+For the scenario schema (YAML) see config/scenarios/*.yaml and the README.
 """
 from __future__ import annotations
 
@@ -18,6 +19,7 @@ import numpy as np
 from .backends import BaseSink
 from .bands import BandTable
 from .fm import to_int16_iq
+from .i18n import t
 from .signal_gen import (
     DroneSpec,
     FrameSignal,
@@ -31,11 +33,11 @@ EventCb = Callable[[dict], None]
 
 @dataclass
 class SignalParams:
-    """Спільні параметри сигналу для сценарію."""
+    """Signal parameters shared across a scenario."""
 
     standard: str = "PAL50"
-    pattern: str = "color_bars"     # реалістичний FPV-профіль за замовчуванням
-    sample_rate: float = 20e6       # вміщує піднесучу 4.43 МГц + широку девіацію
+    pattern: str = "color_bars"     # realistic FPV profile by default
+    sample_rate: float = 20e6       # fits the 4.43 MHz subcarrier + a wide deviation
     deviation_pp_hz: float = 6e6
     gain_db: float = -10.0
     color_burst: bool = False
@@ -54,7 +56,7 @@ class SignalParams:
 
 
 class ScenarioRunner:
-    """Виконує сценарій, керуючи sink'ом."""
+    """Executes a scenario by driving the sink."""
 
     def __init__(
         self,
@@ -67,31 +69,31 @@ class ScenarioRunner:
         self.bands = band_table
         self.on_event = on_event or (lambda e: None)
         self.sleep_slice_s = sleep_slice_s
-        self._live_gain_db = None   # виставляється з GUI-потоку, застосовується тут
+        self._live_gain_db = None   # set from the GUI thread, applied here
 
     # -- utils --------------------------------------------------------------
     def _emit(self, action: str, **kw) -> None:
         self.on_event({"t": time.monotonic(), "action": action, **kw})
 
     def set_live_gain(self, gain_db: float) -> None:
-        """Запит на зміну потужності в рантаймі (з іншого потоку — лише запис).
+        """Request a power change at runtime (from another thread — a write only).
 
-        Присвоєння атрибута атомарне в CPython; реальний виклик sink.set_gain
-        робиться у робочому потоці через _apply_live(), щоб не чіпати libiio
-        з GUI-потоку.
+        Attribute assignment is atomic in CPython; the real sink.set_gain call is
+        made on the worker thread via _apply_live(), so libiio is never touched
+        from the GUI thread.
         """
         self._live_gain_db = float(gain_db)
 
     def _apply_live(self) -> None:
-        """Застосувати відкладену зміну потужності (робочий потік)."""
+        """Apply a deferred power change (worker thread)."""
         g = self._live_gain_db
         if g is not None:
             self._live_gain_db = None
             self.sink.set_gain(g)
-            self._emit("live_gain", gain_db=round(g, 1))   # видимий підтверджувач у журналі
+            self._emit("live_gain", gain_db=round(g, 1))   # visible confirmation in the log
 
     def _sleep(self, seconds: float, stop: threading.Event) -> bool:
-        """Спати шматочками, реагуючи на stop. Повертає False, якщо перервано."""
+        """Sleep in slices while reacting to stop. Returns False if interrupted."""
         end = time.monotonic() + seconds
         while time.monotonic() < end:
             if stop.is_set():
@@ -107,10 +109,10 @@ class ScenarioRunner:
         )
 
     def _resolve_channels(self, cfg: dict) -> List["ChannelRef"]:
-        """Витягти список (name, freq_hz) зі sweep-конфіга."""
+        """Extract the (name, freq_hz) list from a sweep config."""
         out: List[ChannelRef] = []
         if "ranges" in cfg:
-            # діапазони з кроком: [{start_mhz, stop_mhz, step_mhz}]
+            # stepped ranges: [{start_mhz, stop_mhz, step_mhz}]
             for rng in cfg["ranges"]:
                 start = float(rng["start_mhz"])
                 stop = float(rng["stop_mhz"])
@@ -118,7 +120,7 @@ class ScenarioRunner:
                 n = int(round((stop - start) / step)) if step > 0 else 0
                 for k in range(n + 1):
                     f = start + k * step
-                    out.append(ChannelRef(f"{f:.0f}МГц", f * 1e6))
+                    out.append(ChannelRef(f"{f:.0f}MHz", f * 1e6))
         elif "channels" in cfg:
             for name in cfg["channels"]:
                 ch = self.bands.channel(name)
@@ -133,7 +135,9 @@ class ScenarioRunner:
             for f in cfg["freq_list_mhz"]:
                 out.append(ChannelRef(f"{f}MHz", float(f) * 1e6))
         else:
-            raise ValueError("sweep: задайте channels | band | group | freq_list_mhz")
+            raise ValueError(
+                t("sweep: specify channels | band | group | freq_list_mhz")
+            )
         return out
 
     def _channel_freq(self, cfg: dict, key: str = "channel") -> "ChannelRef":
@@ -142,14 +146,14 @@ class ScenarioRunner:
             return ChannelRef(ch.name, ch.freq_hz)
         if "freq_mhz" in cfg:
             return ChannelRef(f"{cfg['freq_mhz']}MHz", float(cfg["freq_mhz"]) * 1e6)
-        raise ValueError(f"Задайте '{key}' або 'freq_mhz'")
+        raise ValueError(t("Specify '{key}' or 'freq_mhz'", key=key))
 
     # -- dispatch -----------------------------------------------------------
     def run(self, scenario: dict, stop: Optional[threading.Event] = None) -> None:
         stop = stop or threading.Event()
         stype = str(scenario.get("type", "static")).lower()
         sp = SignalParams.from_dict(scenario.get("signal"))
-        self._emit("start", scenario=scenario.get("name", stype), type=stype)
+        self._emit("start", scenario=t(scenario.get("name", stype)), type=stype)
         try:
             if stype == "static":
                 self._run_static(scenario, sp, stop)
@@ -160,10 +164,10 @@ class ScenarioRunner:
             elif stype == "multi_drone":
                 self._run_multi_drone(scenario, sp, stop)
             else:
-                raise ValueError(f"Невідомий тип сценарію '{stype}'")
+                raise ValueError(t("Unknown scenario type '{stype}'", stype=stype))
         finally:
             self.sink.stop()
-            self._emit("stop", scenario=scenario.get("name", stype))
+            self._emit("stop", scenario=t(scenario.get("name", stype)))
 
     # -- scenario implementations ------------------------------------------
     def _run_static(self, scenario: dict, sp: SignalParams, stop: threading.Event) -> None:
@@ -175,7 +179,7 @@ class ScenarioRunner:
         self.sink.start(to_int16_iq(frame.iq))
         self._emit("tune", channel=ref.name, freq_mhz=ref.freq_hz / 1e6,
                    gain_db=sp.gain_db, bw_mhz=frame.occupied_bw_hz / 1e6)
-        hold = float(cfg.get("hold_s", 0))  # 0 = поки не зупинять
+        hold = float(cfg.get("hold_s", 0))  # 0 = until stopped
         if hold > 0:
             self._sleep(hold, stop)
         else:
@@ -186,14 +190,14 @@ class ScenarioRunner:
     def _run_sweep(self, scenario: dict, sp: SignalParams, stop: threading.Event) -> None:
         cfg = scenario.get("sweep", {})
         channels = self._resolve_channels(cfg)
-        dwell = float(cfg.get("dwell_s", 2.0))     # передача на кожній частоті
-        pause = float(cfg.get("pause_s", 0.0))     # тиша між частотами (0 = без пауз)
-        loops = int(cfg.get("loops", 0))           # 0 = нескінченно
+        dwell = float(cfg.get("dwell_s", 2.0))     # transmission time on each frequency
+        pause = float(cfg.get("pause_s", 0.0))     # silence between frequencies (0 = no pauses)
+        loops = int(cfg.get("loops", 0))           # 0 = endless
         frame = self._build_frame(sp)
         buf = to_int16_iq(frame.iq)
         self.sink.set_gain(sp.gain_db)
         if pause <= 0:
-            self.sink.start(buf)  # безперервно, крутимо лише LO
+            self.sink.start(buf)  # continuous, only the LO is retuned
         lap = 0
         while not stop.is_set():
             for ref in channels:
@@ -201,13 +205,13 @@ class ScenarioRunner:
                     break
                 self.sink.set_freq(ref.freq_hz)
                 if pause > 0:
-                    self.sink.start(buf)   # (пере)старт передачі на цій частоті
+                    self.sink.start(buf)   # (re)start transmission on this frequency
                 self._emit("tune", channel=ref.name, freq_mhz=ref.freq_hz / 1e6,
                            gain_db=sp.gain_db, lap=lap)
                 if not self._sleep(dwell, stop):
                     break
                 if pause > 0:
-                    self.sink.stop()       # RF off — пауза
+                    self.sink.stop()       # RF off — pause
                     self._emit("pause", freq_mhz=ref.freq_hz / 1e6, seconds=pause)
                     if not self._sleep(pause, stop):
                         break
@@ -263,7 +267,7 @@ class ScenarioRunner:
         std = get_standard(sp.standard)
         drones_cfg = cfg.get("drones", [])
         if not drones_cfg:
-            raise ValueError("multi_drone: задайте список 'drones'")
+            raise ValueError(t("multi_drone: specify the 'drones' list"))
         specs = [
             DroneSpec(
                 pattern=str(d.get("pattern", sp.pattern)),

@@ -28,7 +28,7 @@ def _run_briefly(scenario, seconds=0.4):
     time.sleep(seconds)
     stop.set()
     th.join(timeout=3)
-    assert not th.is_alive(), "рушій не зупинився"
+    assert not th.is_alive(), "engine did not stop"
     return events
 
 
@@ -57,7 +57,7 @@ def test_power_ramp_emits_power():
     powers = [e for e in events if e["action"] == "power"]
     assert len(powers) >= 3
     gains = [e["gain_db"] for e in powers]
-    assert gains[0] < gains[-1]  # рампа зростає
+    assert gains[0] < gains[-1]  # ramp increases
 
 
 def test_multi_drone_builds():
@@ -87,10 +87,10 @@ def test_shipped_scenarios_load_and_validate():
 def test_nyquist_warning_fires():
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
-        # девіація 30 МГц pp -> пік 15 МГц >> 0.45*8МГц
+        # deviation 30 MHz pp -> peak 15 MHz >> 0.45*8 MHz
         generate_frame_iq("bars", PAL50, 8e6, 30e6)
-    assert any("аліасинг" in str(x.message).lower() or "aliy" in str(x.message).lower()
-               or "Ризик" in str(x.message) for x in w)
+    assert any("aliasing" in str(x.message).lower() or "аліасинг" in str(x.message).lower()
+               for x in w)
 
 
 def test_soapy_sink_construction_and_graceful():
@@ -100,9 +100,9 @@ def test_soapy_sink_construction_and_graceful():
     cfg = TxConfig(fs=8e6, freq_hz=1200e6, device="driver=hackrf")
     sink = make_sink("soapy", cfg)
     assert isinstance(sink, SoapySink)
-    # enumerate не падає навіть без SoapySDR
+    # enumerate must not fail even without SoapySDR
     assert isinstance(soapy_enumerate(), list)
-    # без SoapySDR start() має дати зрозумілу RuntimeError, а не крах
+    # without SoapySDR start() must raise a clear RuntimeError, not crash
     if importlib.util.find_spec("SoapySDR") is None:
         with pytest.raises(RuntimeError):
             sink.start(np.zeros(16, dtype=np.complex64))

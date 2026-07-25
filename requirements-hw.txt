@@ -1,17 +1,18 @@
-# Апаратні залежності — лише для реальної передачі через Pluto+.
-# libiio (нативна бібліотека) має бути встановлена окремо:
-#   Windows:  інсталятор libiio (Analog Devices), уже присутній у системі
-#   Linux:    apt install libiio0 libiio-utils   (або збірка з джерел)
+# Hardware dependencies — only needed for real transmission through Pluto+.
+# libiio (the native library) must be installed separately:
+#   Windows:  the libiio installer (Analog Devices)
+#   Linux:    apt install libiio0 libiio-utils   (or build from source)
 #
-# Python-обгортки:
+# Python wrappers:
 pyadi-iio>=0.0.16
 pylibiio>=0.24
 
-# --- SoapySDR (backend=soapy): HackRF, LimeSDR, BladeRF, USRP тощо ---
-# SoapySDR НЕ ставиться через pip — постав системно разом із драйвером пристрою:
-#   Windows: PothosSDR (https://github.com/pothosware/PothosSDR) — містить SoapySDR,
-#            Python-біндинги й драйвери (hackrf/lime/uhd/bladerf). Додай його Python
-#            до PATH або скопіюй SoapySDR у venv.
+# --- SoapySDR (backend=soapy): HackRF, LimeSDR, BladeRF, USRP, etc. ---
+# SoapySDR is NOT installable via pip — install it system-wide together with the
+# device driver:
+#   Windows: PothosSDR (https://github.com/pothosware/PothosSDR) — ships SoapySDR,
+#            the Python bindings and the drivers (hackrf/lime/uhd/bladerf). Add its
+#            Python to PATH or copy SoapySDR into the venv.
 #   Linux:   apt install python3-soapysdr soapysdr-module-hackrf
-#            (або -lime / -uhd / -bladerf / -plutosdr під свій SDR)
-#   macOS:   brew install soapysdr    (+ формула драйвера, напр. soapyhackrf)
+#            (or -lime / -uhd / -bladerf / -plutosdr for your SDR)
+#   macOS:   brew install soapysdr    (+ the driver formula, e.g. soapyhackrf)

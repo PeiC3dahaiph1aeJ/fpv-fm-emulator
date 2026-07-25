@@ -1,8 +1,8 @@
 """TX backends: Pluto (pyadi-iio), file, and null.
 
-Абстракція приймача IQ. Ядро (video/fm/signal_gen) не залежить від апаратури;
-апаратний імпорт (``adi``) відкладений, тож офлайн-розробка й тести працюють без
-libiio-Python та без пристрою.
+An abstraction over the IQ sink. The core (video/fm/signal_gen) does not depend
+on hardware; the hardware import (``adi``) is deferred, so offline development
+and the tests work without libiio-Python and without a device.
 """
 from __future__ import annotations
 
@@ -14,19 +14,21 @@ from typing import Optional
 
 import numpy as np
 
+from .i18n import t
+
 
 @dataclass
 class TxConfig:
     fs: float
     freq_hz: float
-    gain_db: float = -10.0          # tx_hardwaregain (0 = макс, -89 = мін)
+    gain_db: float = -10.0          # tx_hardwaregain (0 = max, -89 = min)
     rf_bw_hz: Optional[float] = None
-    uri: str = "ip:192.168.2.1"     # типовий URI Pluto по USB-Ethernet
-    device: str = "driver=hackrf"   # SoapySDR device args (напр. driver=hackrf|lime|uhd)
+    uri: str = "ip:192.168.2.1"     # typical Pluto URI over USB-Ethernet
+    device: str = "driver=hackrf"   # SoapySDR device args (e.g. driver=hackrf|lime|uhd)
 
 
 class BaseSink(ABC):
-    """Загальний інтерфейс приймача IQ-буфера."""
+    """Common interface of an IQ-buffer sink."""
 
     def __init__(self, cfg: TxConfig):
         self.cfg = cfg
@@ -38,23 +40,23 @@ class BaseSink(ABC):
 
     @abstractmethod
     def start(self, iq_int16: np.ndarray) -> None:
-        """Завантажити циклічний буфер і почати передачу."""
+        """Upload the cyclic buffer and start transmitting."""
 
     @abstractmethod
     def reload(self, iq_int16: np.ndarray) -> None:
-        """Перезалити буфер (зміна патерну/мультидрону)."""
+        """Re-upload the buffer (pattern / multi-drone change)."""
 
     @abstractmethod
     def set_freq(self, freq_hz: float) -> None:
-        """Перестроїти несучу (без перезаливки буфера)."""
+        """Retune the carrier (without re-uploading the buffer)."""
 
     @abstractmethod
     def set_gain(self, gain_db: float) -> None:
-        """Змінити потужність (tx_hardwaregain)."""
+        """Change the power (tx_hardwaregain)."""
 
     @abstractmethod
     def stop(self) -> None:
-        """Зупинити передачу."""
+        """Stop transmitting."""
 
     def close(self) -> None:
         self.stop()
@@ -73,7 +75,7 @@ class BaseSink(ABC):
 #  Pluto backend (pyadi-iio)
 # ---------------------------------------------------------------------------
 class PlutoSink(BaseSink):
-    """Передача через ADALM-Pluto / Pluto+ (pyadi-iio)."""
+    """Transmit through an ADALM-Pluto / Pluto+ (pyadi-iio)."""
 
     def __init__(self, cfg: TxConfig):
         super().__init__(cfg)
@@ -83,10 +85,11 @@ class PlutoSink(BaseSink):
         if self._sdr is not None:
             return
         try:
-            import adi  # noqa: WPS433 (ліниве імпортування апаратної залежності)
-        except ImportError as exc:  # pragma: no cover - залежить від оточення
+            import adi  # noqa: WPS433 (lazy import of the hardware dependency)
+        except ImportError as exc:  # pragma: no cover - depends on the environment
             raise RuntimeError(
-                "pyadi-iio не встановлено. Встановіть: pip install pyadi-iio pylibiio"
+                t("pyadi-iio is not installed. Install it with: "
+                  "pip install pyadi-iio pylibiio")
             ) from exc
 
         sdr = adi.Pluto(uri=self.cfg.uri)
@@ -133,18 +136,19 @@ class PlutoSink(BaseSink):
 
 
 # ---------------------------------------------------------------------------
-#  SoapySDR backend — HackRF, LimeSDR, BladeRF, USRP, Pluto тощо (мульти-SDR)
+#  SoapySDR backend — HackRF, LimeSDR, BladeRF, USRP, Pluto etc. (multi-SDR)
 # ---------------------------------------------------------------------------
 class SoapySink(BaseSink):
-    """Передача через будь-який SDR із драйвером SoapySDR.
+    """Transmit through any SDR that has a SoapySDR driver.
 
-    На відміну від Pluto (циклічний буфер у пристрої), тут немає апаратного
-    зациклення — хост безперервно ллє один кадр у TX-потік у фоновому потоці.
-    Кадр безшовно тайлиться (фаза неперервна), тож зациклення чисте.
+    Unlike the Pluto (cyclic buffer inside the device), there is no hardware
+    looping here — the host continuously pushes one frame into the TX stream from
+    a background thread. The frame tiles seamlessly (phase is continuous), so the
+    loop is clean.
 
     device args: ``driver=hackrf`` | ``driver=lime`` | ``driver=uhd`` | ...
-    Потужність: слайдер -89..0 (як у Pluto) мапиться на реальний діапазон
-    підсилення пристрою (0 дБ = максимум).
+    Power: the -89..0 slider (Pluto convention) is mapped onto the real gain
+    range of the device (0 dB = maximum).
     """
 
     def __init__(self, cfg: TxConfig):
@@ -154,7 +158,7 @@ class SoapySink(BaseSink):
         self._thread = None
         self._stop_evt = threading.Event()
         self._lock = threading.Lock()
-        self._buf = None            # complex64, нормований кадр
+        self._buf = None            # complex64, normalised frame
         self._gmin = 0.0
         self._gmax = 47.0
 
@@ -162,11 +166,12 @@ class SoapySink(BaseSink):
         try:
             import SoapySDR  # noqa: WPS433
             return SoapySDR
-        except ImportError as exc:  # pragma: no cover - залежить від оточення
+        except ImportError as exc:  # pragma: no cover - depends on the environment
             raise RuntimeError(
-                "SoapySDR не встановлено. Постав SoapySDR + драйвер пристрою: "
-                "Windows — PothosSDR (містить SoapySDR і драйвери); "
-                "Linux — apt install python3-soapysdr soapysdr-module-hackrf (або -lime/-uhd/-bladerf)."
+                t("SoapySDR is not installed. Install SoapySDR + the device driver: "
+                  "Windows — PothosSDR (contains SoapySDR and the drivers); "
+                  "Linux — apt install python3-soapysdr soapysdr-module-hackrf "
+                  "(or -lime/-uhd/-bladerf).")
             ) from exc
 
     def _ensure_open(self) -> None:
@@ -185,7 +190,7 @@ class SoapySink(BaseSink):
 
     def _apply_gain(self, gain_db: float) -> None:
         S = self._soapy()
-        # -89..0 (конвенція Pluto, 0 = макс) -> реальний діапазон пристрою
+        # -89..0 (Pluto convention, 0 = max) -> the real range of the device
         norm = max(0.0, min(1.0, (float(gain_db) + 89.0) / 89.0))
         g = self._gmin + norm * (self._gmax - self._gmin)
         self._dev.setGain(S.SOAPY_SDR_TX, 0, float(g))
@@ -204,7 +209,7 @@ class SoapySink(BaseSink):
             self._thread.start()
         self._running = True
 
-    def _tx_loop(self) -> None:  # pragma: no cover - потребує SoapySDR + пристрій
+    def _tx_loop(self) -> None:  # pragma: no cover - requires SoapySDR + a device
         S = self._soapy()
         dev = self._dev
         st = dev.setupStream(S.SOAPY_SDR_TX, S.SOAPY_SDR_CF32, [0])
@@ -264,13 +269,13 @@ class SoapySink(BaseSink):
 
 
 # ---------------------------------------------------------------------------
-#  File backend — запис IQ для інспекції / GNU Radio replay
+#  File backend — write IQ for inspection / GNU Radio replay
 # ---------------------------------------------------------------------------
 class FileSink(BaseSink):
-    """Записати циклічний буфер у файл замість ефіру.
+    """Write the cyclic buffer to a file instead of the air.
 
-    Формат ``.iq`` — interleaved int16 (I,Q,I,Q...), сумісний з GNU Radio /
-    inspectrum. Формат ``.npy`` — complex64 numpy.
+    The ``.iq`` format is interleaved int16 (I,Q,I,Q...), compatible with GNU
+    Radio / inspectrum. The ``.npy`` format is complex64 numpy.
     """
 
     def __init__(self, cfg: TxConfig, path: str):
@@ -307,7 +312,7 @@ class FileSink(BaseSink):
 
 
 # ---------------------------------------------------------------------------
-#  Null backend — dry-run / GUI без апаратури
+#  Null backend — dry-run / GUI without hardware
 # ---------------------------------------------------------------------------
 class NullSink(BaseSink):
     def start(self, iq_int16: np.ndarray) -> None:
@@ -327,7 +332,7 @@ class NullSink(BaseSink):
 
 
 def soapy_enumerate() -> list:
-    """Список доступних SoapySDR-пристроїв (порожньо, якщо SoapySDR не встановлено)."""
+    """List the available SoapySDR devices (empty if SoapySDR is not installed)."""
     try:
         import SoapySDR
     except ImportError:
@@ -348,4 +353,6 @@ def make_sink(kind: str, cfg: TxConfig, file_path: Optional[str] = None) -> Base
         return FileSink(cfg, file_path or "out.iq")
     if kind == "null":
         return NullSink(cfg)
-    raise ValueError(f"Невідомий backend '{kind}' (pluto|soapy|file|null)")
+    raise ValueError(
+        t("Unknown backend '{kind}' (pluto|soapy|file|null)", kind=kind)
+    )

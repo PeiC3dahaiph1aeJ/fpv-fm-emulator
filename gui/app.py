@@ -1,6 +1,6 @@
 """PySide6 GUI: manual control + scenario runner for the FPV FM video emulator.
 
-Запуск:  python -m gui.app     (або  python run_gui.py)
+Run:  python -m gui.app     (or  python run_gui.py)
 """
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from fpv_emulator.backends import TxConfig, make_sink
 from fpv_emulator.bands import load_band_table
 from fpv_emulator.config import list_scenarios, load_scenario
 from fpv_emulator.fm import occupied_bandwidth_hz
+from fpv_emulator.i18n import LANGUAGES, detect_language, get_language, set_language, t
 from fpv_emulator.scenarios import ScenarioRunner
 from fpv_emulator.video import (
     STANDARDS,
@@ -59,7 +60,7 @@ class ScenarioWorker(QtCore.QObject):
             self.finished.emit()
 
     def set_gain(self, gain_db: float):
-        # виставляємо бажану потужність; застосує робочий потік (не чіпаємо libiio тут)
+        # request the desired power; the worker thread applies it (do not touch libiio here)
         if self.runner is not None:
             self.runner.set_live_gain(gain_db)
 
@@ -80,10 +81,10 @@ class PatternPreview(QtWidgets.QLabel):
     def show_pattern(self, pattern: str):
         arr = render_pattern_image(pattern, 240, 320)
         img = np.ascontiguousarray((arr * 255).astype(np.uint8))
-        if img.ndim == 3:  # RGB (кольоровий патерн)
+        if img.ndim == 3:  # RGB (color pattern)
             h, w, _ = img.shape
             qimg = QtGui.QImage(img.data, w, h, w * 3, QtGui.QImage.Format_RGB888)
-        else:              # люма (ч/б)
+        else:              # luma (monochrome)
             h, w = img.shape
             qimg = QtGui.QImage(img.data, w, h, w, QtGui.QImage.Format_Grayscale8)
         self.setPixmap(QtGui.QPixmap.fromImage(qimg).scaled(
@@ -97,29 +98,47 @@ class PatternPreview(QtWidgets.QLabel):
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("FPV FM-емулятор для Pluto+ · тестовий сигнал для детекторів FPV")
+        # language must be active BEFORE any widget is created
+        self.settings = QtCore.QSettings("fpv-fm-emulator", "gui")
+        saved = str(self.settings.value("language", "") or "")
+        set_language(saved if saved in LANGUAGES else detect_language())
+
         self.bands = load_band_table()
         self.thread = None
         self.worker = None
 
+        self._build_ui()
+
+    # -- ui construction (re-runnable: used to retranslate in place) ---------
+    def _build_ui(self, state: dict | None = None):
+        self.setWindowTitle(
+            t("FPV FM emulator for Pluto+ · test signal for FPV detectors"))
+
         central = QtWidgets.QWidget()
-        self.setCentralWidget(central)
         root = QtWidgets.QHBoxLayout(central)
         root.addLayout(self._build_left(), 0)
         root.addLayout(self._build_right(), 1)
+        self.setCentralWidget(central)   # old central widget is deleteLater()'d
 
         self._refresh_channels()
-        self.cb_pattern.setCurrentText("color_bars")   # дефолт: реалістичний FPV-профіль
+        if state is None:
+            self.cb_pattern.setCurrentText("color_bars")   # default: realistic FPV profile
+        else:
+            self._apply_state(state)
         self._update_readouts()
-        self._set_running(False)
-        self._on_backend_changed(self.cb_backend.currentText())   # почат. стан поля SDR
+        self._set_running(self.thread is not None)
+        self._on_backend_changed(self.cb_backend.currentText())   # initial SDR field state
+        if state is not None:
+            # restore the log last: rebuilding may have appended hints of its own
+            self.log.setPlainText(state.get("log", ""))
+            self.log.moveCursor(QtGui.QTextCursor.End)
 
     # -- left: controls -----------------------------------------------------
     def _build_left(self) -> QtWidgets.QVBoxLayout:
         col = QtWidgets.QVBoxLayout()
 
         # backend
-        gb_be = QtWidgets.QGroupBox("Вихід")
+        gb_be = QtWidgets.QGroupBox(t("Output"))
         f = QtWidgets.QFormLayout(gb_be)
         self.cb_backend = QtWidgets.QComboBox()
         self.cb_backend.addItems(["pluto", "soapy", "null", "file"])
@@ -127,14 +146,22 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ed_uri = QtWidgets.QLineEdit("ip:192.168.2.1")
         self.ed_device = QtWidgets.QLineEdit("driver=hackrf")   # SoapySDR args
         self.ed_file = QtWidgets.QLineEdit("out.iq")
-        f.addRow("Backend:", self.cb_backend)
-        f.addRow("URI Pluto:", self.ed_uri)
-        f.addRow("SDR (soapy):", self.ed_device)
-        f.addRow("Файл (file):", self.ed_file)
+        self.cb_lang = QtWidgets.QComboBox()
+        for code, label in LANGUAGES.items():
+            self.cb_lang.addItem(label, code)
+        i_lang = self.cb_lang.findData(get_language())
+        if i_lang >= 0:
+            self.cb_lang.setCurrentIndex(i_lang)
+        self.cb_lang.currentIndexChanged.connect(self._on_language_changed)
+        f.addRow(t("Backend:"), self.cb_backend)
+        f.addRow(t("URI Pluto:"), self.ed_uri)
+        f.addRow(t("SDR (soapy):"), self.ed_device)
+        f.addRow(t("File (file):"), self.ed_file)
+        f.addRow(t("Language:"), self.cb_lang)
         hb_probe = QtWidgets.QHBoxLayout()
-        self.btn_probe = QtWidgets.QPushButton("Проба Pluto")
+        self.btn_probe = QtWidgets.QPushButton(t("Probe Pluto"))
         self.btn_probe.clicked.connect(self._on_probe)
-        self.btn_devices = QtWidgets.QPushButton("Список SDR")
+        self.btn_devices = QtWidgets.QPushButton(t("List SDRs"))
         self.btn_devices.clicked.connect(self._on_list_devices)
         hb_probe.addWidget(self.btn_probe)
         hb_probe.addWidget(self.btn_devices)
@@ -142,10 +169,10 @@ class MainWindow(QtWidgets.QMainWindow):
         col.addWidget(gb_be)
 
         # frequency
-        gb_fr = QtWidgets.QGroupBox("Частота")
+        gb_fr = QtWidgets.QGroupBox(t("Frequency"))
         f = QtWidgets.QFormLayout(gb_fr)
         self.cb_band = QtWidgets.QComboBox()
-        self.cb_band.addItem("— всі —", None)
+        self.cb_band.addItem(t("— all —"), None)
         for b in self.bands.list_bands():
             self.cb_band.addItem(b, b)
         self.cb_band.currentIndexChanged.connect(self._refresh_channels)
@@ -154,72 +181,72 @@ class MainWindow(QtWidgets.QMainWindow):
         self.sp_freq = QtWidgets.QDoubleSpinBox()
         self.sp_freq.setRange(50.0, 6000.0)
         self.sp_freq.setDecimals(1)
-        self.sp_freq.setSuffix(" МГц")
+        self.sp_freq.setSuffix(" " + t("MHz"))
         self.sp_freq.setValue(5658.0)
         self.cb_hw = QtWidgets.QComboBox()
         self.cb_hw.addItems(["hacked", "stock"])
         self.cb_hw.currentIndexChanged.connect(self._update_readouts)
         self.sp_freq.valueChanged.connect(self._update_readouts)
-        f.addRow("Банд:", self.cb_band)
-        f.addRow("Канал:", self.cb_channel)
-        f.addRow("Несуча:", self.sp_freq)
-        f.addRow("HW-діапазон:", self.cb_hw)
+        f.addRow(t("Band:"), self.cb_band)
+        f.addRow(t("Channel:"), self.cb_channel)
+        f.addRow(t("Carrier:"), self.sp_freq)
+        f.addRow(t("HW range:"), self.cb_hw)
         col.addWidget(gb_fr)
 
         # signal
-        gb_sig = QtWidgets.QGroupBox("Сигнал")
+        gb_sig = QtWidgets.QGroupBox(t("Signal"))
         f = QtWidgets.QFormLayout(gb_sig)
         self.cb_std = QtWidgets.QComboBox()
         self.cb_std.addItems(list(STANDARDS.keys()))
         self.cb_pattern = QtWidgets.QComboBox()
-        self.cb_pattern.addItems(list_all_patterns())   # люма + кольорові
+        self.cb_pattern.addItems(list_all_patterns())   # luma + color
         self.cb_pattern.currentTextChanged.connect(self._on_pattern_changed)
         self.sp_fs = QtWidgets.QDoubleSpinBox()
         self.sp_fs.setRange(1.0, 61.44)
         self.sp_fs.setDecimals(2)
         self.sp_fs.setSuffix(" MSPS")
-        self.sp_fs.setValue(20.0)   # дефолт під реалістичний FPV (колір + широка смуга)
+        self.sp_fs.setValue(20.0)   # default for realistic FPV (color + wide bandwidth)
         self.sp_fs.valueChanged.connect(self._update_readouts)
         self.sp_dev = QtWidgets.QDoubleSpinBox()
         self.sp_dev.setRange(0.1, 30.0)
         self.sp_dev.setDecimals(2)
-        self.sp_dev.setSuffix(" МГц pp")
+        self.sp_dev.setSuffix(" " + t("MHz pp"))
         self.sp_dev.setValue(6.0)
         self.sp_dev.valueChanged.connect(self._update_readouts)
-        self.chk_burst = QtWidgets.QCheckBox("Кольоровий burst")
+        self.chk_burst = QtWidgets.QCheckBox(t("Color burst"))
         self.cb_std.currentIndexChanged.connect(self._update_readouts)
-        f.addRow("Стандарт:", self.cb_std)
-        f.addRow("Патерн:", self.cb_pattern)
-        f.addRow("Част. дискр.:", self.sp_fs)
-        f.addRow("Девіація:", self.sp_dev)
+        f.addRow(t("Standard:"), self.cb_std)
+        f.addRow(t("Pattern:"), self.cb_pattern)
+        f.addRow(t("Sample rate:"), self.sp_fs)
+        f.addRow(t("Deviation:"), self.sp_dev)
         f.addRow(self.chk_burst)
         col.addWidget(gb_sig)
 
         # power
-        gb_pw = QtWidgets.QGroupBox("Потужність (tx_hardwaregain)")
+        gb_pw = QtWidgets.QGroupBox(t("Power (tx_hardwaregain)"))
         v = QtWidgets.QVBoxLayout(gb_pw)
         self.sl_gain = QtWidgets.QSlider(QtCore.Qt.Horizontal)
         self.sl_gain.setRange(-89, 0)
         self.sl_gain.setValue(-10)
-        self.lbl_gain = QtWidgets.QLabel("-10 дБ")
+        self.lbl_gain = QtWidgets.QLabel(t("{v} dB", v=-10))
         self.sl_gain.valueChanged.connect(
-            lambda x: (self.lbl_gain.setText(f"{x} дБ"), self._live_gain(x)))
+            lambda x: (self.lbl_gain.setText(t("{v} dB", v=x)), self._live_gain(x)))
         v.addWidget(self.sl_gain)
         v.addWidget(self.lbl_gain)
         col.addWidget(gb_pw)
 
         # mode + start/stop
-        gb_run = QtWidgets.QGroupBox("Режим")
+        gb_run = QtWidgets.QGroupBox(t("Mode"))
         v = QtWidgets.QVBoxLayout(gb_run)
         self.cb_mode = QtWidgets.QComboBox()
-        self.cb_mode.addItem("Ручна несуча (static)", None)
+        self.cb_mode.addItem(t("Manual carrier (static)"), None)
         for name in list_scenarios():
-            self.cb_mode.addItem(f"Сценарій: {name}", name)
+            self.cb_mode.addItem(t("Scenario: {name}", name=name), name)
         v.addWidget(self.cb_mode)
         hb = QtWidgets.QHBoxLayout()
-        self.btn_start = QtWidgets.QPushButton("▶ Старт")
+        self.btn_start = QtWidgets.QPushButton(t("▶ Start"))
         self.btn_start.clicked.connect(self._on_start)
-        self.btn_stop = QtWidgets.QPushButton("■ Стоп")
+        self.btn_stop = QtWidgets.QPushButton(t("■ Stop"))
         self.btn_stop.clicked.connect(self._on_stop)
         hb.addWidget(self.btn_start)
         hb.addWidget(self.btn_stop)
@@ -240,7 +267,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.lbl_read.setWordWrap(True)
         col.addWidget(self.lbl_read)
 
-        col.addWidget(QtWidgets.QLabel("Журнал подій:"))
+        col.addWidget(QtWidgets.QLabel(t("Event log:")))
         self.log = QtWidgets.QPlainTextEdit()
         self.log.setReadOnly(True)
         self.log.setMaximumBlockCount(500)
@@ -249,6 +276,90 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.status = self.statusBar()
         return col
+
+    # -- language -----------------------------------------------------------
+    def _capture_state(self) -> dict:
+        """Snapshot every user-set value so a rebuild does not lose it."""
+        return {
+            "backend": self.cb_backend.currentText(),
+            "uri": self.ed_uri.text(),
+            "device": self.ed_device.text(),
+            "file": self.ed_file.text(),
+            "band_index": self.cb_band.currentIndex(),
+            "channel": self.cb_channel.currentData(),
+            "freq": self.sp_freq.value(),
+            "hw": self.cb_hw.currentText(),
+            "standard": self.cb_std.currentText(),
+            "pattern": self.cb_pattern.currentText(),
+            "fs": self.sp_fs.value(),
+            "dev": self.sp_dev.value(),
+            "burst": self.chk_burst.isChecked(),
+            "gain": self.sl_gain.value(),
+            "mode_index": self.cb_mode.currentIndex(),
+            "log": self.log.toPlainText(),
+        }
+
+    def _apply_state(self, state: dict):
+        """Restore a snapshot taken by :meth:`_capture_state` without firing handlers."""
+        for widget, value in (
+            (self.cb_backend, state.get("backend")),
+            (self.cb_hw, state.get("hw")),
+            (self.cb_std, state.get("standard")),
+            (self.cb_pattern, state.get("pattern")),
+        ):
+            if value:
+                widget.blockSignals(True)
+                widget.setCurrentText(value)
+                widget.blockSignals(False)
+        self.ed_uri.setText(state.get("uri", ""))
+        self.ed_device.setText(state.get("device", ""))
+        self.ed_file.setText(state.get("file", ""))
+
+        band_index = int(state.get("band_index", 0) or 0)
+        if 0 <= band_index < self.cb_band.count():
+            self.cb_band.blockSignals(True)
+            self.cb_band.setCurrentIndex(band_index)
+            self.cb_band.blockSignals(False)
+            self._refresh_channels()
+        chan = state.get("channel")
+        if chan is not None:
+            i = self.cb_channel.findData(chan)
+            if i >= 0:
+                self.cb_channel.blockSignals(True)
+                self.cb_channel.setCurrentIndex(i)
+                self.cb_channel.blockSignals(False)
+
+        for spin, value in ((self.sp_freq, state.get("freq")),
+                            (self.sp_fs, state.get("fs")),
+                            (self.sp_dev, state.get("dev"))):
+            if value is not None:
+                spin.blockSignals(True)
+                spin.setValue(float(value))
+                spin.blockSignals(False)
+
+        self.chk_burst.setChecked(bool(state.get("burst")))
+
+        gain = int(state.get("gain", self.sl_gain.value()))
+        self.sl_gain.blockSignals(True)
+        self.sl_gain.setValue(gain)
+        self.sl_gain.blockSignals(False)
+        self.lbl_gain.setText(t("{v} dB", v=gain))
+
+        mode_index = int(state.get("mode_index", 0) or 0)
+        if 0 <= mode_index < self.cb_mode.count():
+            self.cb_mode.setCurrentIndex(mode_index)
+
+        self.preview.show_pattern(self.cb_pattern.currentText())
+
+    def _on_language_changed(self, index: int):
+        code = self.cb_lang.itemData(index)
+        if not code or code == get_language():
+            return
+        self.settings.setValue("language", code)
+        set_language(code)
+        state = self._capture_state()
+        # rebuild outside this signal handler — the combo itself is about to be replaced
+        QtCore.QTimer.singleShot(0, lambda: self._build_ui(state))
 
     # -- helpers ------------------------------------------------------------
     def _refresh_channels(self):
@@ -260,7 +371,7 @@ class MainWindow(QtWidgets.QMainWindow):
                               for c in self.bands.channels_in_group(g)),
                              key=lambda c: c.freq_hz))
         for ch in chans:
-            # userData = однозначний ключ 'банд:канал' (імена каналів повторюються між бандами)
+            # userData = unambiguous 'band:channel' key (channel names repeat across bands)
             self.cb_channel.addItem(f"{ch.name}  ({ch.freq_mhz:.0f})", f"{ch.band}:{ch.name}")
         self.cb_channel.blockSignals(False)
         self._on_channel_changed()
@@ -276,10 +387,11 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_pattern_changed(self, pattern: str):
         self.preview.show_pattern(pattern)
         if is_color_pattern(pattern) and self.sp_fs.value() < 18.0:
-            # реалістичний FPV: піднесуча 4.43 МГц + широка смуга -> fs 20 MSPS
+            # realistic FPV: 4.43 MHz subcarrier + wide bandwidth -> fs 20 MSPS
             self.sp_fs.setValue(20.0)
-            self._log("[info] Кольоровий патерн — fs піднято до 20 MSPS (піднесуча + широка смуга).")
-        self._update_readouts()   # смуга залежить від патерну (колір ширший)
+            self._log(t("[info] Color pattern — fs raised to 20 MSPS "
+                        "(subcarrier + wide bandwidth)."))
+        self._update_readouts()   # bandwidth depends on the pattern (color is wider)
 
     def _current_signal(self) -> dict:
         return {
@@ -296,20 +408,22 @@ class MainWindow(QtWidgets.QMainWindow):
         dev = self.sp_dev.value() * 1e6
         std = get_standard(self.cb_std.currentText())
         n = int(round(std.line_us * 1e-6 * fs)) * std.total_lines
-        mb = n * 4 / 1e6  # complex int16 = 4 байти/семпл
-        # кольорові патерни ширші за рахунок піднесучої — рахуємо так само, як signal_gen
+        mb = n * 4 / 1e6  # complex int16 = 4 bytes/sample
+        # color patterns are wider because of the subcarrier — computed as in signal_gen
         pattern = self.cb_pattern.currentText()
         video_bw = (std.color_subcarrier_hz + 1.0e6) if is_color_pattern(pattern) else 1.5e6
         bw = occupied_bandwidth_hz(dev, video_bw)
         freq = self.sp_freq.value() * 1e6
         ok, warn = self.bands.check_reachable(freq, self.cb_hw.currentText())
         peak = dev / 2
-        alias = "  ⚠ АЛІАСИНГ (підніміть fs)" if peak > 0.45 * fs else ""
+        alias = ("  " + t("⚠ ALIASING (raise fs)")) if peak > 0.45 * fs else ""
         lines = [
-            f"Несуча:      {freq/1e6:.1f} МГц",
-            f"Кадр:        {n} семпл · {std.frame_period_s*1e3:.1f} мс · буфер ~{mb:.2f} МБ",
-            f"Зайнята смуга ~{bw/1e6:.1f} МГц (fs={fs/1e6:.1f} MSPS){alias}",
-            f"Рядкова:     {std.line_rate_hz/1e3:.2f} кГц",
+            t("Carrier:     {mhz} MHz", mhz=f"{freq/1e6:.1f}"),
+            t("Frame:       {n} samples · {ms} ms · buffer ~{mb} MB",
+              n=n, ms=f"{std.frame_period_s*1e3:.1f}", mb=f"{mb:.2f}"),
+            t("Occupied bandwidth ~{bw} MHz (fs={fs} MSPS){alias}",
+              bw=f"{bw/1e6:.1f}", fs=f"{fs/1e6:.1f}", alias=alias),
+            t("Line rate:   {khz} kHz", khz=f"{std.line_rate_hz/1e3:.2f}"),
         ]
         if not ok:
             lines.append(f"⚠ {warn}")
@@ -339,31 +453,31 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ed_device.setEnabled(soapy)
         self.btn_devices.setEnabled(soapy)
         if name == "null":
-            self._log("[УВАГА] backend = null — сухий прогін, у ефір нічого не йде.")
+            self._log(t("[WARN] backend = null — dry run, nothing goes on air."))
         elif soapy:
-            self._log("[info] backend = soapy — задай пристрій у полі «SDR (soapy)» "
-                      "(напр. driver=hackrf|lime|uhd). «Список SDR» покаже доступні.")
+            self._log(t("[info] backend = soapy — set the device in the «SDR (soapy)» field "
+                        "(e.g. driver=hackrf|lime|uhd). «List SDRs» shows what is available."))
 
     def _on_list_devices(self):
         from fpv_emulator.backends import soapy_enumerate
         devs = soapy_enumerate()
         if not devs:
-            self._log("SoapySDR-пристроїв не знайдено (або SoapySDR не встановлено).")
+            self._log(t("No SoapySDR devices found (or SoapySDR is not installed)."))
             return
-        self._log("Знайдені SDR (SoapySDR):")
+        self._log(t("SDRs found (SoapySDR):"))
         for d in devs:
             self._log(f"  driver={d.get('driver','?')}  {d.get('label','')}")
 
     # -- actions ------------------------------------------------------------
     def _on_probe(self):
         from fpv_emulator.probe import probe
-        self.status.showMessage("Проба Pluto…")
+        self.status.showMessage(t("Probing Pluto…"))
         QtWidgets.QApplication.processEvents()
         res = probe(uri=self.ed_uri.text())
         self._log(res.summary())
         if res.inferred_preset:
             self.cb_hw.setCurrentText(res.inferred_preset)
-        self.status.showMessage("Проба завершена", 4000)
+        self.status.showMessage(t("Probe finished"), 4000)
 
     def _on_start(self):
         if self.thread is not None:
@@ -373,7 +487,7 @@ class MainWindow(QtWidgets.QMainWindow):
             fs = float(scenario.get("signal", {}).get("sample_rate", self.sp_fs.value() * 1e6))
             sink = self._make_sink(fs)
         except Exception as exc:  # noqa: BLE001
-            self._log(f"[ПОМИЛКА] {exc}")
+            self._log(t("[ERROR] {msg}", msg=exc))
             return
 
         self.thread = QtCore.QThread()
@@ -381,16 +495,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self.worker.moveToThread(self.thread)
         self.thread.started.connect(self.worker.run)
         self.worker.event.connect(self._on_event)
-        self.worker.error.connect(lambda m: self._log(f"[ПОМИЛКА] {m}"))
+        self.worker.error.connect(lambda m: self._log(t("[ERROR] {msg}", msg=m)))
         self.worker.finished.connect(self._on_finished)
         self.thread.start()
         self._set_running(True)
-        self._log(f"— старт: {scenario.get('name')} —")
+        self._log(t("— start: {name} —", name=t(scenario.get("name", ""))))
 
     def _on_stop(self):
         if self.worker:
             self.worker.stop()
-            self.status.showMessage("Зупинка…")
+            self.status.showMessage(t("Stopping…"))
 
     def _on_finished(self):
         if self.thread:
@@ -399,10 +513,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.thread = None
         self.worker = None
         self._set_running(False)
-        self.status.showMessage("Зупинено", 3000)
+        self.status.showMessage(t("Stopped"), 3000)
 
     def _live_gain(self, gain_db: int):
-        # жива зміна потужності під час передачі — через робочий потік
+        # live power change while transmitting — routed through the worker thread
         if self.worker:
             self.worker.set_gain(float(gain_db))
 
@@ -410,8 +524,11 @@ class MainWindow(QtWidgets.QMainWindow):
         from fpv_emulator.cli import _fmt_event
         self._log(_fmt_event(e))
         if e.get("action") in ("tune", "power"):
-            self.status.showMessage(
-                f"{e.get('channel','')} @ {e.get('freq_mhz',0):.1f} МГц, {e.get('gain_db','')} дБ")
+            self.status.showMessage(t(
+                "{ch} @ {mhz} MHz, {gain} dB",
+                ch=e.get("channel", ""),
+                mhz=f"{e.get('freq_mhz', 0):.1f}",
+                gain=e.get("gain_db", "")))
 
     def _log(self, msg: str):
         self.log.appendPlainText(msg)
@@ -420,7 +537,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_start.setEnabled(not running)
         self.btn_stop.setEnabled(running)
         for w in (self.cb_backend, self.ed_uri, self.ed_device, self.cb_mode,
-                  self.sp_fs, self.cb_std, self.sp_dev):
+                  self.sp_fs, self.cb_std, self.sp_dev, self.cb_lang):
             w.setEnabled(not running)
 
     def closeEvent(self, ev: QtGui.QCloseEvent):

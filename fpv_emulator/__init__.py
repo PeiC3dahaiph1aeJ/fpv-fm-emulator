@@ -1,9 +1,9 @@
 """FPV analog-video FM emulator for ADALM-Pluto+.
 
-Генератор тестового аналогового FPV-відеосигналу (композитне відео + ЧМ) для
-перевірки роботи детекторів FPV. Ядро (video/fm/signal_gen/bands/scenarios)
-не залежить від апаратури — його можна запускати офлайн і покривати тестами.
-Передача в ефір іде через бекенд Pluto (pyadi-iio) або у файл.
+A generator of test analog FPV video signals (composite video + FM) for checking
+how FPV detectors behave. The core (video/fm/signal_gen/bands/scenarios) does not
+depend on hardware — it can be run offline and covered by tests. Transmission
+over the air goes through the Pluto backend (pyadi-iio) or into a file.
 """
 
 __version__ = "0.1.0"

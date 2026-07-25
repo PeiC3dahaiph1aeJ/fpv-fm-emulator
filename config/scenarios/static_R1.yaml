@@ -1,4 +1,4 @@
-name: "Статична несуча R1"
+name: "Static carrier R1"
 type: static
 
 signal:
@@ -6,8 +6,8 @@ signal:
   pattern: bars
   sample_rate: 8.0e6
   deviation_pp_hz: 6.0e6
-  gain_db: -10          # tx_hardwaregain: 0 = макс, -89 = мін
+  gain_db: -10          # tx_hardwaregain: 0 = max, -89 = min
 
 static:
-  channel: R1           # 5658 МГц; або задайте freq_mhz: 5658
-  hold_s: 0             # 0 = тримати, поки не зупинять (Ctrl+C)
+  channel: R1           # 5658 MHz; or set freq_mhz: 5658
+  hold_s: 0             # 0 = hold until stopped (Ctrl+C)

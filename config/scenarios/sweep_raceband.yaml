@@ -1,4 +1,4 @@
-name: "Свіп по Raceband (5.8 ГГц)"
+name: "Raceband sweep (5.8 GHz)"
 type: sweep
 
 signal:
@@ -9,7 +9,7 @@ signal:
   gain_db: -10
 
 sweep:
-  band: R               # усі R1..R8; або channels: [R1, R4, R8]
-  # group: "5.8G"       # альтернатива: перебір усіх 5.8 ГГц каналів
-  dwell_s: 2.0          # затримка на каналі
-  loops: 0              # 0 = нескінченно
+  band: R               # all of R1..R8; or channels: [R1, R4, R8]
+  # group: "5.8G"       # alternative: iterate over all 5.8 GHz channels
+  dwell_s: 2.0          # dwell time on each channel
+  loops: 0              # 0 = infinite

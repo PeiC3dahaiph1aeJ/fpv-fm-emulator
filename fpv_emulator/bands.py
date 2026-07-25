@@ -11,6 +11,8 @@ from typing import Dict, List, Optional, Tuple
 
 import yaml
 
+from .i18n import t
+
 _DEFAULT_BANDS_YAML = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "bands.yaml"
 )
@@ -89,7 +91,11 @@ class BandTable:
         key = name.strip().upper()
         if key not in self._by_channel:
             raise KeyError(
-                f"Невідомий канал '{name}'. Доступні: {', '.join(sorted(self.list_channel_names()))}"
+                t(
+                    "Unknown channel '{name}'. Available: {list}",
+                    name=name,
+                    list=", ".join(sorted(self.list_channel_names())),
+                )
             )
         return self._by_channel[key]
 
@@ -102,7 +108,7 @@ class BandTable:
     def channels_in_band(self, band_key: str) -> List[Channel]:
         band = self.bands.get(band_key) or self.bands.get(band_key.upper())
         if band is None:
-            raise KeyError(f"Невідомий банд '{band_key}'")
+            raise KeyError(t("Unknown band '{band}'", band=band_key))
         group = band.get("group", "")
         return [
             Channel(band=band_key, name=n, freq_hz=float(f) * 1e6, group=group)
@@ -127,23 +133,30 @@ class BandTable:
     # -- hardware guard -----------------------------------------------------
     def hw_range(self, preset: str) -> HardwareRange:
         if preset not in self.hw_ranges:
-            raise KeyError(f"Немає HW-пресету '{preset}'. Є: {list(self.hw_ranges)}")
+            raise KeyError(
+                t("No HW preset '{preset}'. Available: {list}",
+                  preset=preset, list=list(self.hw_ranges))
+            )
         return self.hw_ranges[preset]
 
     def check_reachable(self, freq_hz: float, preset: str) -> Tuple[bool, Optional[str]]:
-        """Return (ok, warning). warning is a UA-string when out of range."""
+        """Return (ok, warning). warning is a translated string when out of range."""
         rng = self.hw_range(preset)
         if rng.covers(freq_hz):
             return True, None
-        return False, (
-            f"Частота {freq_hz/1e6:.1f} МГц поза діапазоном {rng.chip} "
-            f"({rng.min_hz/1e6:.0f}–{rng.max_hz/1e6:.0f} МГц). "
-            + (
-                "Потрібен AD9361-мод або зовнішній ап-конвертер."
-                if preset == "stock"
-                else "Перевірте налаштування/ап-конвертер."
-            )
+        msg = t(
+            "Frequency {freq} MHz is outside the {chip} range ({min}–{max} MHz).",
+            freq=f"{freq_hz/1e6:.1f}",
+            chip=rng.chip,
+            min=f"{rng.min_hz/1e6:.0f}",
+            max=f"{rng.max_hz/1e6:.0f}",
         )
+        hint = (
+            t("An AD9361 mod or an external up-converter is required.")
+            if preset == "stock"
+            else t("Check the settings / up-converter.")
+        )
+        return False, msg + " " + hint
 
 
 def load_band_table(path: Optional[str] = None) -> BandTable:

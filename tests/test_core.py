@@ -57,7 +57,7 @@ def test_composite_levels_in_range(pattern):
     comp = generate_composite(pattern, PAL50, 8e6)
     assert comp.min() >= PAL50.sync_level - 1e-6
     assert comp.max() <= PAL50.white_level + 0.2  # +burst tolerance
-    # синхро присутнє
+    # sync pulse present
     assert np.isclose(comp.min(), PAL50.sync_level, atol=1e-6)
 
 
@@ -70,18 +70,18 @@ def test_line_rate_close_to_spec():
 
 def test_low_fs_raises():
     with pytest.raises(ValueError):
-        generate_composite("bars", PAL50, 100e3)  # замало семплів на рядок
+        generate_composite("bars", PAL50, 100e3)  # too few samples per line
 
 
 # --------------------------- fm -------------------------------------------
 def test_fm_constant_gives_single_tone():
     fs = 4e6
     dev = 1e6
-    v = np.full(200000, 0.25)          # константа
+    v = np.full(200000, 0.25)          # constant
     iq = fm_modulate(v, fs, dev, center=False)
-    # огинаюча стала
+    # constant envelope
     assert np.allclose(np.abs(iq), 1.0, atol=1e-4)
-    # частота = dev * v
+    # frequency = dev * v
     spec = np.abs(np.fft.fftshift(np.fft.fft(iq)))
     freqs = np.fft.fftshift(np.fft.fftfreq(iq.size, 1 / fs))
     peak = freqs[np.argmax(spec)]
@@ -136,7 +136,7 @@ def test_multi_drone_offsets_present():
     frame = generate_multi_drone_iq(specs, std, 20e6, 3e6)
     spec = np.abs(np.fft.fftshift(np.fft.fft(frame.iq[: 1 << 16])))
     freqs = np.fft.fftshift(np.fft.fftfreq(1 << 16, 1 / 20e6))
-    # енергія має бути помітною по обидва боки від центру
+    # energy must be present on both sides of the centre
     left = spec[freqs < -2e6].sum()
     right = spec[freqs > 2e6].sum()
     assert left > 0 and right > 0

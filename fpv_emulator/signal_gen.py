@@ -1,8 +1,8 @@
 """High-level signal generation: composite video -> FM -> cyclic IQ buffer.
 
-Об'єднує генератор відео та ЧМ-модулятор в готовий до передачі IQ-буфер. Один
-кадр безшовно тайлиться, тож його передають циклічно (буфер лежить у пристрої й
-повторюється без участі USB).
+Combines the video generator and the FM modulator into an IQ buffer ready for
+transmission. A single frame tiles seamlessly, so it is transmitted cyclically
+(the buffer lives in the device and repeats without USB involvement).
 """
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from typing import List, Sequence
 import numpy as np
 
 from .fm import fm_modulate, frequency_shift, occupied_bandwidth_hz
+from .i18n import t
 from .video import (
     VideoStandard,
     generate_composite,
@@ -23,10 +24,10 @@ from .video import (
 
 @dataclass
 class FrameSignal:
-    """Згенерований кадровий IQ-буфер + метадані."""
+    """Generated per-frame IQ buffer + metadata."""
 
-    iq: np.ndarray                 # complex64, |.| нормовано
-    fs: float                      # частота дискретизації, Гц
+    iq: np.ndarray                 # complex64, |.| normalised
+    fs: float                      # sample rate, Hz
     std_name: str
     pattern: str
     deviation_pp_hz: float
@@ -39,24 +40,24 @@ class FrameSignal:
         self.duration_s = self.n_samples / self.fs
 
 
-# приблизна ефективна ширина відео-baseband нашого генератора (для оцінки смуги).
-# Це оцінка «зверху»; головний внесок у зайняту смугу дає девіація.
+# approximate effective video baseband width of our generator (for a bandwidth
+# estimate). This is an upper bound; the deviation dominates the occupied bandwidth.
 _VIDEO_BW_HZ = 1.5e6
 
 
 def check_nyquist(deviation_pp_hz: float, fs: float, max_offset_hz: float = 0.0) -> None:
-    """Попередити, якщо пікова частотна екскурсія наближається до Найквіста (fs/2).
+    """Warn if the peak frequency excursion approaches Nyquist (fs/2).
 
-    Миттєве відхилення частоти = ±deviation_pp/2; для мультидрону додається
-    максимальний зсув несучої. Якщо це перевищує ~0.45*fs — сигнал завернеться.
+    The instantaneous frequency deviation is +/-deviation_pp/2; for multi-drone
+    the maximum carrier offset is added. If that exceeds ~0.45*fs the signal aliases.
     """
     peak_excursion = deviation_pp_hz / 2.0 + abs(max_offset_hz)
     limit = 0.45 * fs
     if peak_excursion > limit:
         warnings.warn(
-            f"Ризик аліасингу: пікова екскурсія {peak_excursion/1e6:.1f} МГц перевищує "
-            f"0.45*fs = {limit/1e6:.1f} МГц. Підніміть sample_rate або зменшіть "
-            f"девіацію/зсуви.",
+            t("Aliasing risk: peak excursion {peak} MHz exceeds 0.45*fs = {limit} MHz. "
+              "Increase sample_rate or reduce the deviation/offsets.",
+              peak=f"{peak_excursion/1e6:.1f}", limit=f"{limit/1e6:.1f}"),
             stacklevel=2,
         )
 
@@ -68,14 +69,14 @@ def generate_frame_iq(
     deviation_pp_hz: float,
     color_burst: bool = False,
 ) -> FrameSignal:
-    """Згенерувати один ЧМ-модульований кадр FPV-відео як IQ.
+    """Generate one FM-modulated frame of FPV video as IQ.
 
-    Кольорові патерни (color_bars…) автоматично йдуть через кольоровий генератор.
+    Color patterns (color_bars…) automatically go through the color generator.
     """
     check_nyquist(deviation_pp_hz, fs)
     if is_color_pattern(pattern):
         composite = generate_composite_color(pattern, std, fs)
-        video_bw = std.color_subcarrier_hz + 1.0e6   # хрома розширює зайняту смугу
+        video_bw = std.color_subcarrier_hz + 1.0e6   # chroma widens the occupied bandwidth
     else:
         composite = generate_composite(pattern, std, fs, color_burst=color_burst)
         video_bw = _VIDEO_BW_HZ
@@ -93,12 +94,12 @@ def generate_frame_iq(
 
 @dataclass
 class DroneSpec:
-    """Одна віртуальна «ціль» у мультидрон-сценарії."""
+    """A single virtual "target" in a multi-drone scenario."""
 
     pattern: str
-    offset_hz: float = 0.0     # зсув несучої відносно центру Pluto (в межах fs)
-    level_db: float = 0.0      # відносний рівень (0 = максимум)
-    std: VideoStandard = None  # None -> береться спільний std
+    offset_hz: float = 0.0     # carrier offset from the Pluto centre (within fs)
+    level_db: float = 0.0      # relative level (0 = maximum)
+    std: VideoStandard = None  # None -> the shared std is used
 
 
 def generate_multi_drone_iq(
@@ -108,19 +109,19 @@ def generate_multi_drone_iq(
     deviation_pp_hz: float,
     color_burst: bool = False,
 ) -> FrameSignal:
-    """Сумувати кілька ЧМ-несучих на різних зсувах у один IQ-буфер.
+    """Sum several FM carriers at different offsets into one IQ buffer.
 
-    Усі несучі мають лежати в межах миттєвої смуги (|offset| < fs/2 з запасом на
-    зайняту смугу кожної). Для рознесених на десятки МГц каналів використовуйте
-    другий TX-канал Pluto+ або перебір у часі.
+    All carriers must fall inside the instantaneous bandwidth (|offset| < fs/2
+    with margin for the occupied bandwidth of each). For channels separated by
+    tens of MHz use the second TX channel of the Pluto+ or sweep them in time.
     """
     if not drones:
-        raise ValueError("Список дронів порожній")
+        raise ValueError(t("Drone list is empty"))
 
     max_offset = max(abs(d.offset_hz) for d in drones)
     check_nyquist(deviation_pp_hz, fs, max_offset_hz=max_offset)
 
-    # довжина буфера = кадр спільного стандарту
+    # buffer length = one frame of the shared standard
     ref = generate_composite(drones[0].pattern, std, fs, color_burst=color_burst)
     n = ref.size
     acc = np.zeros(n, dtype=np.complex64)
@@ -128,7 +129,7 @@ def generate_multi_drone_iq(
     for d in drones:
         d_std = d.std or std
         comp = generate_composite(d.pattern, d_std, fs, color_burst=color_burst)
-        # підігнати під довжину буфера (різні стандарти -> різна довжина)
+        # fit to the buffer length (different standards -> different lengths)
         if comp.size >= n:
             comp = comp[:n]
         else:
@@ -140,7 +141,7 @@ def generate_multi_drone_iq(
             iq = frequency_shift(iq, fs, d.offset_hz)
         acc += iq
 
-    # нормування, щоб уникнути клацання після сумування
+    # normalise to avoid clipping after summation
     peak = np.max(np.abs(acc)) if acc.size else 1.0
     if peak > 0:
         acc = acc / peak

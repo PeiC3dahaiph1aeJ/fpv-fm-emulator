@@ -1,21 +1,21 @@
-name: "Свіп по діапазонах (приклад)"
+name: "Sweep across ranges (example)"
 type: sweep
 
-# Реалістичний FPV-профіль: кольорові смуги з піднесучою 4.43 МГц + широка ЧМ
-# -> зайнята смуга ~17 МГц, як справжній VTX. Детектор не лише бачить RSSI, а й
-# РОЗПІЗНАЄ сигнал як FPV-відео.
+# Realistic FPV profile: color bars with a 4.43 MHz subcarrier + wide FM
+# -> occupied bandwidth ~17 MHz, just like a real VTX. The detector does not
+# merely see RSSI, it also RECOGNIZES the signal as FPV video.
 signal:
   standard: PAL50
-  pattern: color_bars      # колір = піднесуча 4.43 МГц -> «FPV-подібний» спектр
+  pattern: color_bars      # color = 4.43 MHz subcarrier -> "FPV-like" spectrum
   sample_rate: 20.0e6
-  deviation_pp_hz: 6.0e6   # ~17 МГц зайнятої смуги
+  deviation_pp_hz: 6.0e6   # ~17 MHz of occupied bandwidth
   gain_db: 0
 
 sweep:
-  # ПРИКЛАД діапазонів (стандартні FPV-смуги). Замініть на потрібні вам.
+  # EXAMPLE ranges (standard FPV bands). Replace with the ones you need.
   ranges:
-    - { start_mhz: 1200, stop_mhz: 1360, step_mhz: 20 }   # 1.2/1.3 ГГц FPV
-    - { start_mhz: 5650, stop_mhz: 5950, step_mhz: 20 }   # 5.8 ГГц FPV
-  dwell_s: 15              # передача на кожній частоті
-  pause_s: 5              # пауза (RF off) між частотами
-  loops: 0                # 0 = нескінченно (Ctrl+C або Стоп у GUI)
+    - { start_mhz: 1200, stop_mhz: 1360, step_mhz: 20 }   # 1.2/1.3 GHz FPV
+    - { start_mhz: 5650, stop_mhz: 5950, step_mhz: 20 }   # 5.8 GHz FPV
+  dwell_s: 15              # transmit time on each frequency
+  pause_s: 5              # pause (RF off) between frequencies
+  loops: 0                # 0 = infinite (Ctrl+C or Stop in the GUI)

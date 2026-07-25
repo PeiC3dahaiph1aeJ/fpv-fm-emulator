@@ -1,14 +1,17 @@
 """Detect a connected Pluto and report chip / tuning range.
 
-Визначає підключений Pluto+, зчитує атрибути контексту (модель, прошивка, серійник)
-та функціонально перевіряє реальні межі перестроювання TX (щоб зрозуміти, чи це
-стоковий AD9363, чи AD9361-мод із доступом до 5.8 ГГц). Апаратні залежності
-імпортуються ліниво — без пристрою функція повертає інформативний результат.
+Identifies a connected Pluto+, reads the context attributes (model, firmware,
+serial) and functionally probes the real TX tuning limits (to tell whether it is
+a stock AD9363 or an AD9361 mod with access to 5.8 GHz). Hardware dependencies
+are imported lazily — without a device the function still returns an informative
+result.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
+
+from .i18n import t
 
 
 @dataclass
@@ -25,33 +28,38 @@ class ProbeResult:
 
     def summary(self) -> str:
         if not self.connected:
-            return f"Pluto не знайдено ({self.uri}): {self.error or 'немає контексту'}"
-        lines = [f"Pluto підключено: {self.uri}"]
+            return t("Pluto not found ({uri}): {err}",
+                     uri=self.uri, err=self.error or t("no context"))
+        lines = [t("Pluto connected: {uri}", uri=self.uri)]
         for k in ("hw_model", "hw_serial", "fw_version"):
             if k in self.attrs:
                 lines.append(f"  {k}: {self.attrs[k]}")
         if self.tx_lo_max_hz:
             lines.append(
-                f"  TX LO: {self.tx_lo_min_hz/1e6:.0f} – {self.tx_lo_max_hz/1e6:.0f} МГц"
+                "  " + t("TX LO: {min} – {max} MHz",
+                         min=f"{self.tx_lo_min_hz/1e6:.0f}",
+                         max=f"{self.tx_lo_max_hz/1e6:.0f}")
             )
         if self.inferred_preset:
-            lines.append(f"  Ймовірний тип: {self.inferred_preset}")
+            lines.append("  " + t("Likely type: {preset}", preset=self.inferred_preset))
         lines.append(
-            f"  5.8 ГГц напряму: {'ТАК' if self.reaches_5g8 else 'НІ (потрібен мод/ап-конвертер)'}"
+            "  " + t("Direct 5.8 GHz: {answer}",
+                     answer=t("YES") if self.reaches_5g8
+                     else t("NO (a mod / up-converter is required)"))
         )
         for m in self.messages:
             lines.append(f"  · {m}")
         return "\n".join(lines)
 
 
-# частоти для функціональної перевірки меж (Гц)
+# frequencies for the functional limit check (Hz)
 _TEST_FREQS_HZ = [70e6, 325e6, 1200e6, 2450e6, 3300e6, 3800e6, 5800e6, 6000e6]
 
 
 def probe(uri: str = "ip:192.168.2.1", do_range_test: bool = True) -> ProbeResult:
     res = ProbeResult(connected=False, uri=uri)
 
-    # 1) контекст через libiio (pylibiio)
+    # 1) context via libiio (pylibiio)
     ctx = None
     try:
         import iio  # type: ignore
@@ -63,11 +71,13 @@ def probe(uri: str = "ip:192.168.2.1", do_range_test: bool = True) -> ProbeResul
             except Exception:
                 pass
     except ImportError:
-        res.messages.append("pylibiio (модуль iio) не встановлено — пропускаю читання контексту")
+        res.messages.append(
+            t("pylibiio (the iio module) is not installed — skipping the context read")
+        )
     except Exception as exc:
         res.error = str(exc)
 
-    # 2) функціональна перевірка меж TX через pyadi
+    # 2) functional TX limit check via pyadi
     if do_range_test:
         try:
             import adi  # type: ignore
@@ -88,11 +98,13 @@ def probe(uri: str = "ip:192.168.2.1", do_range_test: bool = True) -> ProbeResul
                 res.inferred_preset = "hacked" if res.reaches_5g8 else "stock"
             del sdr
         except ImportError:
-            res.messages.append("pyadi-iio не встановлено — пропускаю перевірку меж TX")
+            res.messages.append(
+                t("pyadi-iio is not installed — skipping the TX range check")
+            )
         except Exception as exc:
             if not res.error:
                 res.error = str(exc)
 
     if not res.connected and not res.error:
-        res.error = "IIO-контекст не створено (пристрій не підключено?)"
+        res.error = t("IIO context was not created (device not connected?)")
     return res

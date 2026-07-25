@@ -6,6 +6,8 @@ from typing import Any, Dict
 
 import yaml
 
+from .i18n import t
+
 _VALID_TYPES = {"static", "sweep", "power_ramp", "multi_drone"}
 
 _SCEN_DIR = os.path.join(
@@ -14,7 +16,7 @@ _SCEN_DIR = os.path.join(
 
 
 def load_scenario(path: str) -> Dict[str, Any]:
-    """Завантажити й перевірити сценарій. ``path`` — файл або ім'я з config/scenarios."""
+    """Load and validate a scenario. ``path`` is a file or a name from config/scenarios."""
     if not os.path.exists(path):
         cand = os.path.join(_SCEN_DIR, path)
         if not cand.endswith((".yaml", ".yml")):
@@ -22,7 +24,7 @@ def load_scenario(path: str) -> Dict[str, Any]:
         if os.path.exists(cand):
             path = cand
         else:
-            raise FileNotFoundError(f"Сценарій не знайдено: {path}")
+            raise FileNotFoundError(t("Scenario not found: {path}", path=path))
     with open(path, "r", encoding="utf-8") as fh:
         data = yaml.safe_load(fh) or {}
     validate_scenario(data)
@@ -33,14 +35,17 @@ def validate_scenario(data: Dict[str, Any]) -> None:
     stype = str(data.get("type", "")).lower()
     if stype not in _VALID_TYPES:
         raise ValueError(
-            f"Поле 'type' має бути одним з {_VALID_TYPES}, отримано '{stype}'"
+            t("Field 'type' must be one of {types}, got '{value}'",
+              types=_VALID_TYPES, value=stype)
         )
     if stype not in data:
-        raise ValueError(f"Відсутній блок '{stype}:' для сценарію типу '{stype}'")
+        raise ValueError(
+            t("Missing block '{stype}:' for a scenario of type '{stype}'", stype=stype)
+        )
 
 
 def list_scenarios() -> Dict[str, str]:
-    """Повернути {ім'я: шлях} для сценаріїв у config/scenarios."""
+    """Return {name: path} for the scenarios in config/scenarios."""
     out: Dict[str, str] = {}
     if os.path.isdir(_SCEN_DIR):
         for fn in sorted(os.listdir(_SCEN_DIR)):
