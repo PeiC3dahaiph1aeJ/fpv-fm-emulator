@@ -279,6 +279,7 @@ class MainWindow(QtWidgets.QMainWindow):
             # реалістичний FPV: піднесуча 4.43 МГц + широка смуга -> fs 20 MSPS
             self.sp_fs.setValue(20.0)
             self._log("[info] Кольоровий патерн — fs піднято до 20 MSPS (піднесуча + широка смуга).")
+        self._update_readouts()   # смуга залежить від патерну (колір ширший)
 
     def _current_signal(self) -> dict:
         return {
@@ -296,7 +297,10 @@ class MainWindow(QtWidgets.QMainWindow):
         std = get_standard(self.cb_std.currentText())
         n = int(round(std.line_us * 1e-6 * fs)) * std.total_lines
         mb = n * 4 / 1e6  # complex int16 = 4 байти/семпл
-        bw = occupied_bandwidth_hz(dev, 1.5e6)
+        # кольорові патерни ширші за рахунок піднесучої — рахуємо так само, як signal_gen
+        pattern = self.cb_pattern.currentText()
+        video_bw = (std.color_subcarrier_hz + 1.0e6) if is_color_pattern(pattern) else 1.5e6
+        bw = occupied_bandwidth_hz(dev, video_bw)
         freq = self.sp_freq.value() * 1e6
         ok, warn = self.bands.check_reachable(freq, self.cb_hw.currentText())
         peak = dev / 2
