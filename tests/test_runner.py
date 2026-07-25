@@ -91,3 +91,18 @@ def test_nyquist_warning_fires():
         generate_frame_iq("bars", PAL50, 8e6, 30e6)
     assert any("аліасинг" in str(x.message).lower() or "aliy" in str(x.message).lower()
                or "Ризик" in str(x.message) for x in w)
+
+
+def test_soapy_sink_construction_and_graceful():
+    import importlib.util
+    import numpy as np
+    from fpv_emulator.backends import make_sink, SoapySink, TxConfig, soapy_enumerate
+    cfg = TxConfig(fs=8e6, freq_hz=1200e6, device="driver=hackrf")
+    sink = make_sink("soapy", cfg)
+    assert isinstance(sink, SoapySink)
+    # enumerate не падає навіть без SoapySDR
+    assert isinstance(soapy_enumerate(), list)
+    # без SoapySDR start() має дати зрозумілу RuntimeError, а не крах
+    if importlib.util.find_spec("SoapySDR") is None:
+        with pytest.raises(RuntimeError):
+            sink.start(np.zeros(16, dtype=np.complex64))

@@ -40,7 +40,7 @@ fpv_emulator/
   video.py        композитне відео (PAL50/NTSC60), люма + кольорові патерни, хрома
   fm.py           ЧМ-модуляція baseband → IQ, конверсія в int16
   signal_gen.py   відео+ЧМ → кадровий (циклічний) IQ; мультидрон
-  backends.py     приймачі IQ: Pluto (pyadi-iio) | file | null
+  backends.py     приймачі IQ: Pluto (pyadi-iio) | soapy (HackRF/Lime/…) | file | null
   scenarios.py    рушій сценаріїв (static/sweep+pause/power_ramp/multi_drone), жива потужність
   config.py       завантаження/валідація YAML-сценаріїв
   probe.py        визначення чипа й меж перестроювання Pluto
@@ -50,7 +50,7 @@ config/
   bands.yaml      частоти каналів (редаговані)
   scenarios/*.yaml приклади сценаріїв
 scripts/probe_pluto.py   автономна проба апаратури
-tests/            офлайн-тести ядра (pytest, 29 шт.)
+tests/            офлайн-тести ядра (pytest, 30 шт.)
 ```
 
 ---
@@ -182,11 +182,40 @@ sweep:
 
 ---
 
+## Підтримувані SDR
+
+Ядро генерує IQ незалежно від апаратури; передавальний бекенд обирається прапорцем
+`--backend` (CLI) або у GUI.
+
+| Backend | Пристрої | Примітки |
+|---------|----------|----------|
+| `pluto` | ADALM-Pluto / Pluto+ | нативно (pyadi-iio/libiio), циклічний буфер у пристрої |
+| `soapy` | **HackRF, LimeSDR, BladeRF, USRP**, Pluto та ін. | через SoapySDR; хост безперервно ллє кадр |
+| `file` | будь-який (офлайн) | запис IQ у `.iq`/`.npy` |
+| `null` | — | сухий прогін без ефіру |
+
+SoapySDR-приклади:
+```bash
+python -m fpv_emulator.cli list-devices                       # знайти підключені SDR
+python -m fpv_emulator.cli tx --backend soapy --device driver=hackrf --freq-mhz 5800 --gain 0
+python -m fpv_emulator.cli tx --backend soapy --device driver=lime --scenario sweep_ranges
+```
+У GUI: backend `soapy`, у полі «SDR (soapy)» — `driver=hackrf|lime|uhd|bladerf`,
+кнопка «Список SDR» покаже доступні. Потужність (слайдер −89..0, 0 = макс)
+автоматично мапиться на реальний діапазон підсилення пристрою.
+
+**Нюанси:** HackRF — 8 біт, напівдуплекс, макс ~20 MSPS, немає апаратного циклічного
+буфера (хост крутить кадр). Дешеві RTL-SDR-донгли **передавати не вміють** (тільки
+прийом). Діагностики через RX (проба, RX-самоприйом) — специфічні для Pluto.
+Встановлення SoapySDR — див. `requirements-hw.txt` (pip його не ставить).
+
+---
+
 ## Тести
 ```bash
 python -m pytest tests/ -q
 ```
-29 офлайн-тестів (без апаратури): пошук каналів, HW-guard, таймінг/рівні відео,
+30 офлайн-тестів (без апаратури): пошук каналів, HW-guard, таймінг/рівні відео,
 кольорова піднесуча, ЧМ, мультидрон, попередження про аліасинг, димові прогони
 рушія (sweep/pause/power_ramp/multi_drone), жива потужність.
 

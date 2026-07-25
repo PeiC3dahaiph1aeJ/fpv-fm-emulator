@@ -86,6 +86,21 @@ def cmd_list_scenarios(args) -> int:
     return 0
 
 
+def cmd_list_devices(args) -> int:
+    from .backends import soapy_enumerate
+    devs = soapy_enumerate()
+    if not devs:
+        print("SoapySDR-пристроїв не знайдено (або SoapySDR не встановлено).")
+        print("Windows: постав PothosSDR. Linux: apt install python3-soapysdr soapysdr-module-<драйвер>.")
+        return 0
+    print("Знайдені SDR (SoapySDR):")
+    for d in devs:
+        drv = d.get("driver", "?")
+        label = d.get("label", "")
+        print(f"  driver={drv}   {label}")
+    return 0
+
+
 def cmd_gen(args) -> int:
     std = get_standard(args.standard)
     fs = float(args.sample_rate)
@@ -157,7 +172,7 @@ def cmd_tx(args) -> int:
     fs = sp.sample_rate
 
     cfg = TxConfig(fs=fs, freq_hz=0.0, gain_db=sp.gain_db, uri=args.uri,
-                   rf_bw_hz=min(fs, 20e6))
+                   rf_bw_hz=min(fs, 20e6), device=args.device)
     sink = make_sink(args.backend, cfg, file_path=args.out)
 
     runner = ScenarioRunner(sink, bt, on_event=lambda e: print(_fmt_event(e)))
@@ -185,6 +200,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("list-bands", help="Список діапазонів/каналів").set_defaults(func=cmd_list_bands)
     sub.add_parser("list-patterns", help="Список тестових патернів").set_defaults(func=cmd_list_patterns)
     sub.add_parser("list-scenarios", help="Список сценаріїв").set_defaults(func=cmd_list_scenarios)
+    sub.add_parser("list-devices", help="Список SDR через SoapySDR").set_defaults(func=cmd_list_devices)
 
     pg = sub.add_parser("gen", help="Згенерувати IQ у файл (без апаратури)")
     pg.add_argument("--pattern", default="color_bars", choices=list_all_patterns())
@@ -195,8 +211,10 @@ def build_parser() -> argparse.ArgumentParser:
     pg.set_defaults(func=cmd_gen)
 
     pt = sub.add_parser("tx", help="Передавати (Pluto/file/null) або запустити сценарій")
-    pt.add_argument("--backend", default="null", choices=["pluto", "file", "null"])
-    pt.add_argument("--uri", default="ip:192.168.2.1")
+    pt.add_argument("--backend", default="null", choices=["pluto", "soapy", "file", "null"])
+    pt.add_argument("--uri", default="ip:192.168.2.1", help="URI Pluto (backend=pluto)")
+    pt.add_argument("--device", default="driver=hackrf",
+                    help="SoapySDR device args (backend=soapy): driver=hackrf|lime|uhd|bladerf")
     pt.add_argument("--channel", help="напр. R1")
     pt.add_argument("--freq-mhz", help="несуча вручну, МГц")
     pt.add_argument("--pattern", default="color_bars", choices=list_all_patterns())

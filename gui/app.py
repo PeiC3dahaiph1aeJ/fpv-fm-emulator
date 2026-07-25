@@ -112,6 +112,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.cb_pattern.setCurrentText("color_bars")   # дефолт: реалістичний FPV-профіль
         self._update_readouts()
         self._set_running(False)
+        self._on_backend_changed(self.cb_backend.currentText())   # почат. стан поля SDR
 
     # -- left: controls -----------------------------------------------------
     def _build_left(self) -> QtWidgets.QVBoxLayout:
@@ -121,15 +122,23 @@ class MainWindow(QtWidgets.QMainWindow):
         gb_be = QtWidgets.QGroupBox("Вихід")
         f = QtWidgets.QFormLayout(gb_be)
         self.cb_backend = QtWidgets.QComboBox()
-        self.cb_backend.addItems(["pluto", "null", "file"])
+        self.cb_backend.addItems(["pluto", "soapy", "null", "file"])
+        self.cb_backend.currentTextChanged.connect(self._on_backend_changed)
         self.ed_uri = QtWidgets.QLineEdit("ip:192.168.2.1")
+        self.ed_device = QtWidgets.QLineEdit("driver=hackrf")   # SoapySDR args
         self.ed_file = QtWidgets.QLineEdit("out.iq")
         f.addRow("Backend:", self.cb_backend)
         f.addRow("URI Pluto:", self.ed_uri)
+        f.addRow("SDR (soapy):", self.ed_device)
         f.addRow("Файл (file):", self.ed_file)
+        hb_probe = QtWidgets.QHBoxLayout()
         self.btn_probe = QtWidgets.QPushButton("Проба Pluto")
         self.btn_probe.clicked.connect(self._on_probe)
-        f.addRow(self.btn_probe)
+        self.btn_devices = QtWidgets.QPushButton("Список SDR")
+        self.btn_devices.clicked.connect(self._on_list_devices)
+        hb_probe.addWidget(self.btn_probe)
+        hb_probe.addWidget(self.btn_devices)
+        f.addRow(hb_probe)
         col.addWidget(gb_be)
 
         # frequency
@@ -317,8 +326,29 @@ class MainWindow(QtWidgets.QMainWindow):
         kind = self.cb_backend.currentText()
         cfg = TxConfig(fs=fs, freq_hz=self.sp_freq.value() * 1e6,
                        gain_db=float(self.sl_gain.value()),
-                       uri=self.ed_uri.text(), rf_bw_hz=min(fs, 20e6))
+                       uri=self.ed_uri.text(), rf_bw_hz=min(fs, 20e6),
+                       device=self.ed_device.text())
         return make_sink(kind, cfg, file_path=self.ed_file.text())
+
+    def _on_backend_changed(self, name: str):
+        soapy = (name == "soapy")
+        self.ed_device.setEnabled(soapy)
+        self.btn_devices.setEnabled(soapy)
+        if name == "null":
+            self._log("[УВАГА] backend = null — сухий прогін, у ефір нічого не йде.")
+        elif soapy:
+            self._log("[info] backend = soapy — задай пристрій у полі «SDR (soapy)» "
+                      "(напр. driver=hackrf|lime|uhd). «Список SDR» покаже доступні.")
+
+    def _on_list_devices(self):
+        from fpv_emulator.backends import soapy_enumerate
+        devs = soapy_enumerate()
+        if not devs:
+            self._log("SoapySDR-пристроїв не знайдено (або SoapySDR не встановлено).")
+            return
+        self._log("Знайдені SDR (SoapySDR):")
+        for d in devs:
+            self._log(f"  driver={d.get('driver','?')}  {d.get('label','')}")
 
     # -- actions ------------------------------------------------------------
     def _on_probe(self):
@@ -385,8 +415,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def _set_running(self, running: bool):
         self.btn_start.setEnabled(not running)
         self.btn_stop.setEnabled(running)
-        for w in (self.cb_backend, self.ed_uri, self.cb_mode, self.sp_fs,
-                  self.cb_std, self.sp_dev):
+        for w in (self.cb_backend, self.ed_uri, self.ed_device, self.cb_mode,
+                  self.sp_fs, self.cb_std, self.sp_dev):
             w.setEnabled(not running)
 
     def closeEvent(self, ev: QtGui.QCloseEvent):
