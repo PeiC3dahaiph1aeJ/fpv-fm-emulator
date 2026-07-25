@@ -1,0 +1,17 @@
+name: "Кілька дронів одночасно (5.8 ГГц)"
+type: multi_drone
+
+signal:
+  standard: PAL50
+  sample_rate: 20.0e6   # ширша миттєва смуга, щоб вмістити рознесені несучі
+  deviation_pp_hz: 6.0e6
+  gain_db: -6
+
+multi_drone:
+  center_channel: R4    # несуча Pluto = 5769 МГц (центр)
+  # offset_mhz — зсув кожного дрона відносно центру; має вкладатися в fs/2
+  drones:
+    - { pattern: bars,     offset_mhz: -6.0, level_db: 0 }    # ~5763 МГц
+    - { pattern: grid,     offset_mhz:  0.0, level_db: -3 }   # ~5769 МГц
+    - { pattern: checker,  offset_mhz:  6.0, level_db: -6 }   # ~5775 МГц
+  hold_s: 0             # 0 = тримати, поки не зупинять

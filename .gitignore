@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+*.iq
+*.npy
+out.*
+.pytest_cache/
+*.egg-info/
+
+# приватні локальні сценарії з реальними параметрами детектора (не публікувати)
+config/scenarios/*_local.yaml

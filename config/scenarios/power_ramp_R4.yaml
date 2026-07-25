@@ -1,0 +1,18 @@
+name: "Рамп потужності R4 (наближення/віддалення дрона)"
+type: power_ramp
+
+signal:
+  standard: PAL50
+  pattern: bars
+  sample_rate: 8.0e6
+  deviation_pp_hz: 6.0e6
+  # gain задається блоком power_ramp нижче
+
+power_ramp:
+  channel: R4           # 5769 МГц
+  start_db: -50         # «далеко» (слабкий сигнал)
+  end_db: 0             # «близько» (максимум)
+  duration_s: 15        # тривалість одного проходу
+  steps: 60             # кроків дискретизації рампи
+  mode: pingpong        # up | down | pingpong (наближення+віддалення)
+  loops: 0              # 0 = нескінченно

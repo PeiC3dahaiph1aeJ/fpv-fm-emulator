@@ -1,0 +1,10 @@
+# Ядро (DSP + CLI + тести) — працює офлайн, без апаратури
+numpy>=1.24
+scipy>=1.10
+PyYAML>=6.0
+
+# GUI
+PySide6-Essentials>=6.5
+
+# Тести (dev)
+pytest>=7.0

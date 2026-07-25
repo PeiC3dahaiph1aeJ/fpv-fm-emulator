@@ -1,0 +1,13 @@
+name: "Статична несуча R1"
+type: static
+
+signal:
+  standard: PAL50
+  pattern: bars
+  sample_rate: 8.0e6
+  deviation_pp_hz: 6.0e6
+  gain_db: -10          # tx_hardwaregain: 0 = макс, -89 = мін
+
+static:
+  channel: R1           # 5658 МГц; або задайте freq_mhz: 5658
+  hold_s: 0             # 0 = тримати, поки не зупинять (Ctrl+C)

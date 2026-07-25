@@ -1,0 +1,8 @@
+# Апаратні залежності — лише для реальної передачі через Pluto+.
+# libiio (нативна бібліотека) має бути встановлена окремо:
+#   Windows:  інсталятор libiio (Analog Devices), уже присутній у системі
+#   Linux:    apt install libiio0 libiio-utils   (або збірка з джерел)
+#
+# Python-обгортки:
+pyadi-iio>=0.0.16
+pylibiio>=0.24

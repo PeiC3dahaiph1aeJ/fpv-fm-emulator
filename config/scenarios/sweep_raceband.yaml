@@ -1,0 +1,15 @@
+name: "Свіп по Raceband (5.8 ГГц)"
+type: sweep
+
+signal:
+  standard: PAL50
+  pattern: bars
+  sample_rate: 8.0e6
+  deviation_pp_hz: 6.0e6
+  gain_db: -10
+
+sweep:
+  band: R               # усі R1..R8; або channels: [R1, R4, R8]
+  # group: "5.8G"       # альтернатива: перебір усіх 5.8 ГГц каналів
+  dwell_s: 2.0          # затримка на каналі
+  loops: 0              # 0 = нескінченно
