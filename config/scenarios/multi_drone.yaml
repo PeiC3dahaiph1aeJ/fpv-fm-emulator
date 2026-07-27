@@ -1,17 +1,28 @@
-name: "Several drones at once (5.8 GHz)"
+name: "Two drones at once (5.8 GHz)"
 type: multi_drone
 
+# Two simultaneous targets spaced 18 MHz apart (offsets -9 / +9 MHz).
+#
+# Why 18 MHz: one realistic FPV carrier occupies ~11.5 MHz (-30 dB, measured).
+# Below ~14 MHz of spacing the notch between the two peaks collapses to ~16 dB and
+# the detector sees ONE wide blob instead of two targets; at 18 MHz the notch is
+# ~36 dB (cleanly separated) while only 0.34% of the power folds past Nyquist.
+#
+# Why not wider: this Pluto tops out at 30.72 MSPS (verified on the device — 40,
+# 50 and 61.44 MSPS are rejected with errno 22, and disabling the TX FIR does not
+# lift it), so ~20 MHz of spacing is the hard ceiling and it already folds ~1% of
+# the power. For a wider split use a second SDR (backend=soapy) on its own carrier.
 signal:
   standard: PAL50
-  sample_rate: 20.0e6   # wider instantaneous bandwidth to fit the spaced carriers
+  pattern: color_bars    # realistic FPV profile — what the detector actually recognizes
+  sample_rate: 30.72e6   # device maximum; fits both carriers plus their sidebands
   deviation_pp_hz: 6.0e6
   gain_db: -6
 
 multi_drone:
-  center_channel: R4    # Pluto carrier = 5769 MHz (center)
-  # offset_mhz — offset of each drone from the center; must fit within fs/2
+  center_channel: R4     # Pluto carrier = 5769 MHz (centre of the pair)
+  # offset_mhz — offset of each drone from the centre carrier
   drones:
-    - { pattern: bars,     offset_mhz: -6.0, level_db: 0 }    # ~5763 MHz
-    - { pattern: grid,     offset_mhz:  0.0, level_db: -3 }   # ~5769 MHz
-    - { pattern: checker,  offset_mhz:  6.0, level_db: -6 }   # ~5775 MHz
-  hold_s: 0             # 0 = hold until stopped
+    - { pattern: color_bars,    offset_mhz: -9.0, level_db: 0 }    # ~5760 MHz, near target
+    - { pattern: color_bars100, offset_mhz:  9.0, level_db: -6 }   # ~5778 MHz, weaker/farther
+  hold_s: 0              # 0 = hold until stopped

@@ -18,7 +18,13 @@ import threading
 from . import __version__
 from .backends import TxConfig, make_sink
 from .bands import load_band_table
-from .config import list_scenarios, load_scenario
+from .config import (
+    GAIN_MAX_DB,
+    GAIN_MIN_DB,
+    clamp_gain,
+    list_scenarios,
+    load_scenario,
+)
 from .fm import to_int16_iq
 from .i18n import available_languages, detect_language, set_language, t
 from .probe import probe
@@ -53,11 +59,19 @@ def _fmt_event(e: dict) -> str:
                  "offsets {offsets} MHz, span ~{span} MHz",
                  center=f"{e.get('center_mhz', 0):.1f}", n_drones=e.get("n_drones"),
                  offsets=e.get("offsets_mhz"), span=f"{e.get('span_mhz', 0):.1f}")
+    if action == "range":
+        return t("[RANGE] {start}–{stop} MHz, step {step} MHz -> {n} point(s), "
+                 "actually {first}–{last} MHz",
+                 start=f"{e.get('start_mhz', 0):.0f}", stop=f"{e.get('stop_mhz', 0):.0f}",
+                 step=f"{e.get('step_mhz', 0):g}", n=e.get("n"),
+                 first=f"{e.get('first_mhz', 0):.0f}", last=f"{e.get('last_mhz', 0):.0f}")
     if action == "start":
         return t("[START] scenario '{name}' (type {type})",
                  name=e.get("scenario"), type=e.get("type"))
     if action == "stop":
         return t("[STOP ] scenario '{name}'", name=e.get("scenario"))
+    if action == "error":
+        return t("[ERROR] transmission failed: {message}", message=e.get("message"))
     return f"[{action}] {e}"
 
 
@@ -72,8 +86,10 @@ def cmd_list_bands(args) -> int:
     for group in bt.groups():
         print(f"\n=== {group} ===")
         for ch in bt.channels_in_group(group):
+            # C1..C8 exist in several bands — print the form the user must type
+            name = f"{ch.band}:{ch.name}" if bt.is_ambiguous(ch.name) else ch.name
             print(t("  {name}  {freq} MHz   (band {band})",
-                    name=f"{ch.name:5s}", freq=f"{ch.freq_mhz:7.1f}", band=ch.band))
+                    name=f"{name:8s}", freq=f"{ch.freq_mhz:7.1f}", band=ch.band))
     return 0
 
 
@@ -147,7 +163,28 @@ def _run_scenario(runner: ScenarioRunner, scenario: dict) -> int:
     return 0
 
 
+def _gain_from_arg(value) -> float:
+    """--gain -> a value tx_hardwaregain accepts (-89..0 dB), with a warning."""
+    gain_db = float(value)
+    clamped = clamp_gain(gain_db)
+    if clamped != gain_db:
+        print(t("[WARN] gain {value} dB is outside {min}..{max} dB — clamped to {clamped} dB.",
+                value=gain_db, min=GAIN_MIN_DB, max=GAIN_MAX_DB, clamped=clamped),
+              file=sys.stderr)
+    return clamped
+
+
 def cmd_tx(args) -> int:
+    try:
+        return _cmd_tx(args)
+    except (ValueError, KeyError, FileNotFoundError, RuntimeError) as exc:
+        # a bad channel/field must read as a message, not as a traceback
+        msg = exc.args[0] if exc.args else str(exc)
+        print(t("[ERROR] {msg}", msg=msg), file=sys.stderr)
+        return 1
+
+
+def _cmd_tx(args) -> int:
     bt = load_band_table()
 
     # build the scenario: either from a file, or a single one from the flags
@@ -172,7 +209,7 @@ def cmd_tx(args) -> int:
                 "pattern": args.pattern,
                 "sample_rate": float(args.sample_rate),
                 "deviation_pp_hz": float(args.deviation),
-                "gain_db": float(args.gain),
+                "gain_db": _gain_from_arg(args.gain),
             },
             "static": ({"channel": args.channel} if args.channel
                        else {"freq_mhz": float(args.freq_mhz)}),

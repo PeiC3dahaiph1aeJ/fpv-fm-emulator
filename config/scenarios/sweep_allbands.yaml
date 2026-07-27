@@ -9,8 +9,13 @@ signal:
   gain_db: -8
 
 sweep:
-  # one representative per band; replace with the channels you need
-  channels: [C4, R4, F4]          # 1200 MHz, 5769 MHz, 5800 MHz ...
+  # One representative per band; replace with the channels you need.
+  # NOTE: C1..C8 exist in FOUR bands (G13 1.3G / G09 900M / G24 2.4G / G33 3.3G),
+  # so a bare "C4" is ambiguous and is rejected — always write BAND:CHANNEL.
+  channels: [G13:C4, R4, F4]
+  #          ^1200 MHz (G13, 1.2/1.3 GHz)
+  #                   ^5769 MHz (R4, Raceband)
+  #                       ^5800 MHz (F4, Band F)
   # freq_list_mhz: [915, 1200, 2450, 3400, 5769]   # alternative: set manually
   dwell_s: 3.0
   loops: 0

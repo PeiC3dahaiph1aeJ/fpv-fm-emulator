@@ -6,6 +6,11 @@
 #  differ from vendor to vendor — representative sets are given here, adjust
 #  them to match your own fleet.
 #
+#  Channel names may be written bare ("R4") or qualified as "BAND:CHANNEL"
+#  ("G13:C4"). Bare names are only allowed when they are unique: C1..C8 are
+#  reused by G13/G09/G24/G33, so a bare "C4" is REJECTED — write "G13:C4"
+#  (1200 MHz) or "G33:C4" (3440 MHz) to say which one you mean.
+#
 #  hardware_ranges — reference tuning limits of the Pluto+ (used for warnings).
 #    stock  = AD9363 (325 MHz – 3.8 GHz)
 #    hacked = AD9361 mod   (70 MHz – 6.0 GHz) — reaches 5.8 GHz directly

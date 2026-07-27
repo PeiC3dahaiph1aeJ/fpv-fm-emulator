@@ -100,8 +100,8 @@ It opens right away with a working profile (color_bars, 20 MSPS, PAL50, backend
 - **Signal:** standard, pattern (preview in color), sample rate, deviation.
 - **Power:** slider, **changes at runtime** while transmitting.
 - **Mode:** manual carrier or a ready-made scenario; Start/Stop; event log.
-- **Language:** a selector in the top toolbar switches the interface between English
-  and Ukrainian; the choice is remembered between sessions.
+- **Language:** a selector in the **Output** panel switches the interface between
+  English and Ukrainian; the choice is remembered between sessions.
 
 To transmit: choose backend `pluto` (or `soapy`), a frequency → **Start**.
 
@@ -234,9 +234,12 @@ For installing SoapySDR see `requirements-hw.txt` (pip does not install it).
 ```bash
 python -m pytest tests/ -q
 ```
-30 offline tests (no hardware): channel lookup, HW guard, video timing/levels, color
-subcarrier, FM, multi-drone, aliasing warning, smoke runs of the engine
-(sweep/pause/power_ramp/multi_drone), live power.
+50 offline tests, no hardware required. They cover: band/channel lookup (including
+ambiguous bare names), the HW-range guard, composite video timing and levels, the
+color path (subcarrier, burst placement, PAL V-phase alternation), FM invariants and
+the continuity of the cyclic-buffer seam, multi-drone summation and its carrier
+spacing, the aliasing warnings, and scenario-engine runs against a recording sink
+(sweep, the RF-off pause, tune-before-start ordering, power ramp, live power).
 
 ---
 

@@ -155,17 +155,37 @@ def _pat_checker(h: int, w: int, n: int = 16) -> np.ndarray:
     return (xs[None, :] ^ ys[:, None]).astype(float)
 
 
-def _pat_multiburst(h: int, w: int) -> np.ndarray:
-    """Sine bursts of increasing frequency — maximum HF, widest bandwidth.
-    Loads the detector hardest in terms of occupied bandwidth."""
+# multiburst: absolute video frequencies (Hz), so the transmitted content does
+# not depend on the sample rate. A burst is only rendered while it stays below
+# _MULTIBURST_MAX_REL of the sample rate; higher ones are skipped (left flat).
+_MULTIBURST_HZ = (0.5e6, 1.0e6, 2.0e6, 3.0e6, 4.0e6)
+_MULTIBURST_MAX_REL = 0.4
+# nominal sample rate used when a pattern is rendered for preview only
+_PREVIEW_FS_HZ = 20.0e6
+
+
+def _pat_multiburst(h: int, w: int, fs: float = _PREVIEW_FS_HZ) -> np.ndarray:
+    """Sine bursts of increasing video frequency (0.5/1/2/3/4 MHz) — maximum HF,
+    widest bandwidth. Loads the detector hardest in terms of occupied bandwidth.
+
+    The frequencies are absolute (Hz) and converted to cycles-per-sample with the
+    current fs, so the transmitted content is the same at any sample rate. A burst
+    whose relative frequency would exceed _MULTIBURST_MAX_REL (~0.4, i.e. the fs
+    cannot represent it) is skipped and its segment stays at the blanking level.
+    """
     x = np.arange(w)
     seg = w // 6
     row = np.full(w, 0.5)
-    for i in range(1, 6):
-        f = 0.02 * i               # relative frequency (cycles per sample)
+    for i, f_hz in enumerate(_MULTIBURST_HZ, start=1):
+        f_rel = f_hz / float(fs)          # cycles per sample
+        if f_rel > _MULTIBURST_MAX_REL:   # fs too low for this burst — skip it
+            continue
         s0, s1 = i * seg, (i + 1) * seg
-        row[s0:s1] = 0.5 + 0.5 * np.sin(2 * np.pi * f * (x[s0:s1] - s0))
+        row[s0:s1] = 0.5 + 0.5 * np.sin(2 * np.pi * f_rel * (x[s0:s1] - s0))
     return np.tile(row, (h, 1))
+
+
+_pat_multiburst.needs_fs = True   # generate_composite passes the real fs
 
 
 def _pat_flat(level: float) -> Callable[[int, int], np.ndarray]:
@@ -233,13 +253,26 @@ def _rgb_to_yuv(rgb: np.ndarray):
     return y, u, v
 
 
-def render_pattern_image(pattern: str, height: int = 288, width: int = 384) -> np.ndarray:
-    """Preview: luma pattern → 2D [0..1]; color pattern → RGB [0..1] (HxWx3)."""
+def render_pattern_image(pattern: str, height: int = 288, width: int = 384,
+                         fs: float = _PREVIEW_FS_HZ) -> np.ndarray:
+    """Preview: luma pattern → 2D [0..1]; color pattern → RGB [0..1] (HxWx3).
+
+    fs only matters for patterns defined in absolute video frequencies
+    (multiburst); pass the real sample rate to preview what will be transmitted.
+    """
     if pattern in _COLOR_PATTERNS:
         return np.clip(_COLOR_PATTERNS[pattern](height, width), 0.0, 1.0)
     if pattern in _PATTERNS:
-        return np.clip(_PATTERNS[pattern](height, width), 0.0, 1.0)
+        return np.clip(_render_luma(pattern, height, width, fs), 0.0, 1.0)
     raise KeyError(t("Unknown pattern '{pattern}'", pattern=pattern))
+
+
+def _render_luma(pattern: str, h: int, w: int, fs: float) -> np.ndarray:
+    """Call a luma pattern function, giving it fs only if it asks for it."""
+    fn = _PATTERNS[pattern]
+    if getattr(fn, "needs_fs", False):
+        return fn(h, w, fs=fs)
+    return fn(h, w)
 
 
 # ---------------------------------------------------------------------------
@@ -284,7 +317,7 @@ def generate_composite(
         )
 
     # render the pattern image for the active lines
-    img = _PATTERNS[pattern](std.active_lines, n_active)
+    img = _render_luma(pattern, std.active_lines, n_active, fs)
     img = np.clip(img, 0.0, 1.0)
     active_pixels = std.black_level + img * (std.white_level - std.black_level)
 

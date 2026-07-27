@@ -54,6 +54,8 @@ class BandTable:
     bands: Dict[str, dict] = field(default_factory=dict)
     hw_ranges: Dict[str, HardwareRange] = field(default_factory=dict)
     _by_channel: Dict[str, Channel] = field(default_factory=dict, repr=False)
+    # bare name -> ["BAND:CHANNEL", ...] for names used by more than one band
+    _ambiguous: Dict[str, List[str]] = field(default_factory=dict, repr=False)
 
     # -- construction -------------------------------------------------------
     @classmethod
@@ -72,6 +74,7 @@ class BandTable:
 
     def _index(self) -> None:
         self._by_channel = {}
+        self._ambiguous = {}
         for band_key, band in self.bands.items():
             group = band.get("group", "")
             for ch_name, freq_mhz in (band.get("channels") or {}).items():
@@ -82,13 +85,44 @@ class BandTable:
                     group=group,
                 )
                 # index by bare channel name and by "BAND:CHANNEL"
-                self._by_channel[ch_name.upper()] = ch
-                self._by_channel[f"{band_key.upper()}:{ch_name.upper()}"] = ch
+                bare = ch_name.upper()
+                qualified = f"{band_key.upper()}:{bare}"
+                if bare in self._by_channel:
+                    # the same bare name in several bands (C1..C8 live in G13/G09/
+                    # G24/G33). Keep the FIRST binding and remember the collision so
+                    # a bare lookup fails loudly instead of silently transmitting on
+                    # another band's frequency.
+                    first = self._by_channel[bare]
+                    alts = self._ambiguous.setdefault(
+                        bare, [f"{first.band.upper()}:{bare}"]
+                    )
+                    if qualified not in alts:
+                        alts.append(qualified)
+                else:
+                    self._by_channel[bare] = ch
+                self._by_channel[qualified] = ch
 
     # -- queries ------------------------------------------------------------
+    def is_ambiguous(self, name: str) -> bool:
+        """True when a bare channel name is used by more than one band."""
+        key = name.strip().upper()
+        return ":" not in key and key in self._ambiguous
+
+    def qualified_names(self, name: str) -> List[str]:
+        """The ``"BAND:CHANNEL"`` alternatives of an ambiguous bare name."""
+        return list(self._ambiguous.get(name.strip().upper(), []))
+
     def channel(self, name: str) -> Channel:
         """Look up a channel by ``"R1"`` or ``"R:R1"`` (case-insensitive)."""
         key = name.strip().upper()
+        if ":" not in key and key in self._ambiguous:
+            raise KeyError(
+                t(
+                    "Channel name '{name}' is ambiguous — use a qualified name: {list}",
+                    name=name,
+                    list=", ".join(self._ambiguous[key]),
+                )
+            )
         if key not in self._by_channel:
             raise KeyError(
                 t(

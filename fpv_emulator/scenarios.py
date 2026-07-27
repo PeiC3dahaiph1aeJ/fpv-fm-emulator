@@ -9,6 +9,7 @@ For the scenario schema (YAML) see config/scenarios/*.yaml and the README.
 """
 from __future__ import annotations
 
+import math
 import threading
 import time
 from dataclasses import dataclass, field
@@ -18,6 +19,7 @@ import numpy as np
 
 from .backends import BaseSink
 from .bands import BandTable
+from .config import clamp_gain
 from .fm import to_int16_iq
 from .i18n import t
 from .signal_gen import (
@@ -45,12 +47,14 @@ class SignalParams:
     @classmethod
     def from_dict(cls, d: dict) -> "SignalParams":
         d = dict(d or {})
+        gain = d.get("gain_db")
         return cls(
             standard=str(d.get("standard", "PAL50")),
             pattern=str(d.get("pattern", "color_bars")),
             sample_rate=float(d.get("sample_rate", 20e6)),
             deviation_pp_hz=float(d.get("deviation_pp_hz", 6e6)),
-            gain_db=float(d.get("gain_db", -10.0)),
+            # tx_hardwaregain accepts -89..0 only — never hand libiio errno 22
+            gain_db=clamp_gain(-10.0 if gain is None else gain),
             color_burst=bool(d.get("color_burst", False)),
         )
 
@@ -82,7 +86,7 @@ class ScenarioRunner:
         made on the worker thread via _apply_live(), so libiio is never touched
         from the GUI thread.
         """
-        self._live_gain_db = float(gain_db)
+        self._live_gain_db = clamp_gain(gain_db)
 
     def _apply_live(self) -> None:
         """Apply a deferred power change (worker thread)."""
@@ -92,6 +96,21 @@ class ScenarioRunner:
             self.sink.set_gain(g)
             self._emit("live_gain", gain_db=round(g, 1))   # visible confirmation in the log
 
+    def _check_sink_error(self) -> None:
+        """Surface an error raised on a sink's background thread (see BaseSink.poll_error).
+
+        A SoapySDR TX thread cannot raise into the engine, so it parks the
+        exception on the sink; we pick it up here and abort the scenario instead
+        of "running" silently with the radio dead.
+        """
+        poll = getattr(self.sink, "poll_error", None)
+        if poll is None:        # sink without the error channel
+            return
+        err = poll()
+        if err is not None:
+            self._emit("error", message=str(err))
+            raise RuntimeError(t("Transmission failed: {err}", err=str(err)))
+
     def _sleep(self, seconds: float, stop: threading.Event) -> bool:
         """Sleep in slices while reacting to stop. Returns False if interrupted."""
         end = time.monotonic() + seconds
@@ -99,6 +118,7 @@ class ScenarioRunner:
             if stop.is_set():
                 return False
             self._apply_live()
+            self._check_sink_error()
             time.sleep(min(self.sleep_slice_s, max(0.0, end - time.monotonic())))
         return not stop.is_set()
 
@@ -117,10 +137,18 @@ class ScenarioRunner:
                 start = float(rng["start_mhz"])
                 stop = float(rng["stop_mhz"])
                 step = float(rng.get("step_mhz", 50.0))
-                n = int(round((stop - start) / step)) if step > 0 else 0
-                for k in range(n + 1):
-                    f = start + k * step
+                # floor, not round: a point beyond stop_mhz would put ~17 MHz of
+                # occupied bandwidth outside the interval the operator asked for.
+                n = int(math.floor((stop - start) / step + 1e-9)) if step > 0 else -1
+                pts = [start + k * step for k in range(n + 1)]
+                pts = [f for f in pts if f <= stop + 1e-9]
+                for f in pts:
                     out.append(ChannelRef(f"{f:.0f}MHz", f * 1e6))
+                # flooring silently drops the tail of a non-multiple range —
+                # report the span actually covered.
+                if pts:
+                    self._emit("range", start_mhz=start, stop_mhz=stop, step_mhz=step,
+                               n=len(pts), first_mhz=pts[0], last_mhz=pts[-1])
         elif "channels" in cfg:
             for name in cfg["channels"]:
                 ch = self.bands.channel(name)
@@ -185,11 +213,19 @@ class ScenarioRunner:
         else:
             while not stop.is_set():
                 self._apply_live()
+                self._check_sink_error()
                 time.sleep(self.sleep_slice_s)
 
     def _run_sweep(self, scenario: dict, sp: SignalParams, stop: threading.Event) -> None:
         cfg = scenario.get("sweep", {})
         channels = self._resolve_channels(cfg)
+        if not channels:
+            # an empty list would spin the loop below at 100% CPU with the sink
+            # already transmitting on an unintended LO — refuse before start()
+            raise ValueError(
+                t("The 'sweep' block resolves to zero frequencies — "
+                  "check channels / band / group / freq_list_mhz / ranges.")
+            )
         dwell = float(cfg.get("dwell_s", 2.0))     # transmission time on each frequency
         pause = float(cfg.get("pause_s", 0.0))     # silence between frequencies (0 = no pauses)
         loops = int(cfg.get("loops", 0))           # 0 = endless
@@ -197,6 +233,9 @@ class ScenarioRunner:
         buf = to_int16_iq(frame.iq)
         self.sink.set_gain(sp.gain_db)
         if pause <= 0:
+            # tune BEFORE opening the device: start() opens it at cfg.freq_hz,
+            # which is 0 Hz until the first set_freq -> OSError [Errno 22]
+            self.sink.set_freq(channels[0].freq_hz)
             self.sink.start(buf)  # continuous, only the LO is retuned
         lap = 0
         while not stop.is_set():
@@ -222,8 +261,10 @@ class ScenarioRunner:
     def _run_power_ramp(self, scenario: dict, sp: SignalParams, stop: threading.Event) -> None:
         cfg = scenario.get("power_ramp", {})
         ref = self._channel_freq(cfg)
-        start_db = float(cfg.get("start_db", -40.0))
-        end_db = float(cfg.get("end_db", 0.0))
+        # tx_hardwaregain accepts -89..0 only; an end_db of 10 would abort the
+        # run mid-ramp with OSError [Errno 22]
+        start_db = clamp_gain(cfg.get("start_db", -40.0))
+        end_db = clamp_gain(cfg.get("end_db", 0.0))
         duration = float(cfg.get("duration_s", 10.0))
         mode = str(cfg.get("mode", "up")).lower()   # up | down | pingpong
         loops = int(cfg.get("loops", 0))
@@ -291,6 +332,7 @@ class ScenarioRunner:
         else:
             while not stop.is_set():
                 self._apply_live()
+                self._check_sink_error()
                 time.sleep(self.sleep_slice_s)
 
 

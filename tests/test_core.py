@@ -14,12 +14,42 @@ from fpv_emulator.signal_gen import (
     generate_frame_iq,
     generate_multi_drone_iq,
 )
-from fpv_emulator.video import PAL50, NTSC60, generate_composite, list_patterns, get_standard
+from fpv_emulator.video import (
+    PAL50,
+    NTSC60,
+    generate_composite,
+    generate_composite_color,
+    list_patterns,
+    get_standard,
+)
 
 
 # --------------------------- bands ----------------------------------------
 def test_band_lookup_and_case_insensitive():
     bt = load_band_table()
+    assert bt.channel("R1").freq_mhz == pytest.approx(5658.0)
+    assert bt.channel("r1").freq_hz == bt.channel("R1").freq_hz
+    assert bt.channel("R:R8").freq_mhz == pytest.approx(5917.0)
+
+
+def test_ambiguous_bare_channel_name_raises():
+    """'C4' exists in the 1.3G, 900M, 2.4G and 3.3G tables.
+
+    Resolving it silently picks whichever band was indexed last and transmits up
+    to 2.5 GHz away from what the operator asked for — it has to be refused, while
+    every unambiguous spelling keeps working.
+    """
+    bt = load_band_table()
+    with pytest.raises((KeyError, ValueError)) as exc:
+        bt.channel("C4")
+    msg = str(exc.value)
+    assert "C4" in msg
+    # the message must offer the qualified alternatives, not just complain
+    assert msg.count(":C4") >= 2, msg
+
+    assert bt.channel("G13:C4").freq_mhz == pytest.approx(1200.0)
+    assert bt.channel("g13:c4").freq_hz == bt.channel("G13:C4").freq_hz
+    assert bt.channel("G09:C4").freq_mhz == pytest.approx(945.0)
     assert bt.channel("R1").freq_mhz == pytest.approx(5658.0)
     assert bt.channel("r1").freq_hz == bt.channel("R1").freq_hz
     assert bt.channel("R:R8").freq_mhz == pytest.approx(5917.0)
@@ -88,11 +118,36 @@ def test_fm_constant_gives_single_tone():
     assert peak == pytest.approx(dev * 0.25, abs=fs / iq.size * 4)
 
 
-def test_fm_centering_zero_mean():
-    fs = 4e6
-    v = np.linspace(-0.3, 0.7, 100000)
-    iq = fm_modulate(v, fs, 2e6, center=True)
-    assert np.allclose(np.abs(iq), 1.0, atol=1e-4)
+def test_fm_centering_keeps_the_cyclic_seam_continuous():
+    """center=True is what makes one frame loop seamlessly in the cyclic buffer.
+
+    A constant envelope proves nothing here — fm_modulate produces one for either
+    value of ``center``. What matters is the phase where the device wraps from the
+    last sample of the frame back to the first: with center=True the wrap simply
+    continues the modulation (seam error ~4e-8 rad, mean phase step ~2e-6
+    rad/sample); with center=False the same frame jumps ~1.1 rad at the seam and
+    drifts 0.32 rad/sample, i.e. a spur comb repeating at the 50 Hz field rate.
+    Measured on the production profile: color_bars + PAL50 + 20 MSPS + 6 MHz.
+    """
+    fs, dev = 20e6, 6e6
+    comp = generate_composite_color("color_bars", PAL50, fs)
+    iq = fm_modulate(comp, fs, dev, center=True)
+
+    # the phase step fm_modulate applies to sample 0 — exactly what the wrap
+    # from the last sample back to the first has to reproduce
+    v = np.asarray(comp, dtype=np.float64)
+    v -= v.mean()
+    natural = 2.0 * np.pi * dev * v[0] / fs
+    seam = np.angle(complex(iq[0]) * np.conj(complex(iq[-1])))
+    seam_err = np.angle(np.exp(1j * (seam - natural)))
+    assert abs(seam_err) < 1e-4, f"seam discontinuity {seam_err:.6f} rad"
+
+    # and no residual carrier offset: the mean phase step across the frame is ~0
+    phase = np.unwrap(np.angle(iq.astype(np.complex128)))
+    mean_step = float(np.mean(np.diff(phase)))
+    assert abs(mean_step) < 1e-5, f"carrier offset {mean_step:.6e} rad/sample"
+
+    assert np.allclose(np.abs(iq), 1.0, atol=1e-4)   # still a constant envelope
 
 
 def test_to_int16_range():
@@ -129,14 +184,42 @@ def test_multi_drone_peak_normalised():
     assert frame.iq.size > 0
 
 
-def test_multi_drone_offsets_present():
+_MULTI_N = 1 << 16          # FFT length used to locate the drone carriers
+
+
+def _lobe_centroids(iq, count, fs=20e6):
+    """Power centroids of the ``count`` strongest lobes, strongest first sorted
+    by frequency. Summing magnitudes over half-planes cannot fail (they are
+    non-negative by construction) — the centroid says *where* the energy is."""
+    freqs = np.fft.fftshift(np.fft.fftfreq(_MULTI_N, 1 / fs))
+    power = np.abs(np.fft.fftshift(np.fft.fft(iq[:_MULTI_N]))) ** 2
+    work = np.convolve(power, np.ones(64) / 64, mode="same")   # find lobes, not lines
+    out = []
+    for _ in range(count):
+        f0 = freqs[int(np.argmax(work))]
+        near = np.abs(freqs - f0) <= 1.5e6
+        out.append(float(np.sum(freqs[near] * power[near]) / np.sum(power[near])))
+        work[np.abs(freqs - f0) <= 2.5e6] = 0.0                # next lobe
+    return sorted(out)
+
+
+def test_multi_drone_offsets_land_on_the_requested_carriers():
     std = get_standard("PAL50")
-    specs = [DroneSpec("bars", offset_hz=-5e6, level_db=0),
-             DroneSpec("bars", offset_hz=5e6, level_db=0)]
-    frame = generate_multi_drone_iq(specs, std, 20e6, 3e6)
-    spec = np.abs(np.fft.fftshift(np.fft.fft(frame.iq[: 1 << 16])))
-    freqs = np.fft.fftshift(np.fft.fftfreq(1 << 16, 1 / 20e6))
-    # energy must be present on both sides of the centre
-    left = spec[freqs < -2e6].sum()
-    right = spec[freqs > 2e6].sum()
-    assert left > 0 and right > 0
+    fs, dev, off = 20e6, 3e6, 5e6
+    bin_hz = fs / _MULTI_N
+
+    # Reference: the same modulation with no offset. Its lobe does not sit on DC
+    # (the blanking level is ~0.7 MHz below the frame mean), so the two shifted
+    # carriers are measured against it rather than against 0 Hz.
+    ref_frame = generate_multi_drone_iq([DroneSpec("bars", 0.0, 0.0)], std, fs, dev)
+    ref = _lobe_centroids(ref_frame.iq, 1, fs)[0]
+
+    specs = [DroneSpec("bars", offset_hz=-off, level_db=0),
+             DroneSpec("bars", offset_hz=off, level_db=0)]
+    frame = generate_multi_drone_iq(specs, std, fs, dev)
+    low, high = _lobe_centroids(frame.iq, 2, fs)
+
+    # both carriers within a few bins (~0.9 kHz) of where they were asked for
+    assert low == pytest.approx(ref - off, abs=3 * bin_hz)
+    assert high == pytest.approx(ref + off, abs=3 * bin_hz)
+    assert high - low == pytest.approx(2 * off, abs=2 * bin_hz)

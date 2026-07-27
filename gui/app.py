@@ -7,6 +7,7 @@ from __future__ import annotations
 import os
 import sys
 import threading
+import warnings
 
 import numpy as np
 
@@ -27,6 +28,12 @@ from fpv_emulator.video import (
     list_all_patterns,
     render_pattern_image,
 )
+
+try:
+    # shared aliasing criterion — keeps the readout and the generator from disagreeing
+    from fpv_emulator.signal_gen import would_alias as _would_alias
+except ImportError:      # older signal_gen: fall back to the local dev/2 test
+    _would_alias = None
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +84,10 @@ class PatternPreview(QtWidgets.QLabel):
         self.setMinimumSize(320, 240)
         self.setAlignment(QtCore.Qt.AlignCenter)
         self.setStyleSheet("background:#101014; border:1px solid #333;")
+        # the unscaled source: show_pattern can run before the widget is laid out
+        # (e.g. during a language rebuild), so the scaling is redone on every resize
+        self._source: QtGui.QPixmap | None = None
+        self._scaled_for = QtCore.QSize()
 
     def show_pattern(self, pattern: str):
         arr = render_pattern_image(pattern, 240, 320)
@@ -87,15 +98,36 @@ class PatternPreview(QtWidgets.QLabel):
         else:              # luma (monochrome)
             h, w = img.shape
             qimg = QtGui.QImage(img.data, w, h, w, QtGui.QImage.Format_Grayscale8)
-        self.setPixmap(QtGui.QPixmap.fromImage(qimg).scaled(
-            self.width(), self.height(),
-            QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation))
+        # QPixmap.fromImage copies, so the numpy buffer may go out of scope
+        self._source = QtGui.QPixmap.fromImage(qimg)
+        self._scaled_for = QtCore.QSize()
+        self._rescale()
+
+    def _rescale(self):
+        if self._source is None or self._source.isNull():
+            return
+        size = self.size()
+        if size == self._scaled_for:
+            return
+        self._scaled_for = size
+        self.setPixmap(self._source.scaled(
+            size, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation))
+
+    def resizeEvent(self, ev: QtGui.QResizeEvent):
+        super().resizeEvent(ev)
+        self._rescale()
 
 
 # ---------------------------------------------------------------------------
 #  Main window
 # ---------------------------------------------------------------------------
 class MainWindow(QtWidgets.QMainWindow):
+    # generator warnings are raised on the worker thread — queued into the log
+    warning_logged = QtCore.Signal(str)
+
+    # closeEvent grace period: 30 * (100 ms wait + 200 ms timer) ~ 9 s after the first 2 s
+    _CLOSE_MAX_ATTEMPTS = 30
+
     def __init__(self):
         super().__init__()
         # language must be active BEFORE any widget is created
@@ -106,8 +138,38 @@ class MainWindow(QtWidgets.QMainWindow):
         self.bands = load_band_table()
         self.thread = None
         self.worker = None
+        self._close_attempts = 0
+        self._prev_showwarning = None
 
         self._build_ui()
+        # run_gui.bat starts pythonw — stderr is discarded, so warnings.warn() from the
+        # generator would never reach the operator. Route them into the event log.
+        self.warning_logged.connect(self._log, QtCore.Qt.QueuedConnection)
+        self._install_warning_hook()
+
+    def _install_warning_hook(self) -> None:
+        """Mirror every ``warnings.warn()`` into the event log."""
+        previous = warnings.showwarning
+
+        def _to_log(message, category, filename, lineno, file=None, line=None):
+            try:
+                self.warning_logged.emit(t("[WARN] {msg}", msg=message))
+            except RuntimeError:
+                pass                       # window already destroyed
+            try:
+                previous(message, category, filename, lineno, file, line)
+            except Exception:              # noqa: BLE001 — stderr may not exist (pythonw)
+                pass
+
+        # without this the aliasing warning is printed once per location per process
+        warnings.simplefilter("always", UserWarning)
+        warnings.showwarning = _to_log
+        self._prev_showwarning = previous
+
+    def _remove_warning_hook(self) -> None:
+        if self._prev_showwarning is not None:
+            warnings.showwarning = self._prev_showwarning
+            self._prev_showwarning = None
 
     # -- ui construction (re-runnable: used to retranslate in place) ---------
     def _build_ui(self, state: dict | None = None):
@@ -122,6 +184,13 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._refresh_channels()
         if state is None:
+            # _refresh_channels() -> _on_channel_changed() has just parked sp_freq on the
+            # LOWEST channel of the "— all —" list (900 MHz, a licensed band). Preselect
+            # the documented default channel instead.
+            i = self.cb_channel.findData("R:R1")
+            if i >= 0:
+                self.cb_channel.setCurrentIndex(i)
+                self._on_channel_changed()   # setCurrentIndex is silent if i was current
             self.cb_pattern.setCurrentText("color_bars")   # default: realistic FPV profile
         else:
             self._apply_state(state)
@@ -174,7 +243,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.cb_band = QtWidgets.QComboBox()
         self.cb_band.addItem(t("— all —"), None)
         for b in self.bands.list_bands():
-            self.cb_band.addItem(b, b)
+            # show the translated band name; userData stays the raw YAML key
+            self.cb_band.addItem(t(self.bands.bands[b].get("name", b)), b)
         self.cb_band.currentIndexChanged.connect(self._refresh_channels)
         self.cb_channel = QtWidgets.QComboBox()
         self.cb_channel.currentIndexChanged.connect(self._on_channel_changed)
@@ -182,7 +252,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.sp_freq.setRange(50.0, 6000.0)
         self.sp_freq.setDecimals(1)
         self.sp_freq.setSuffix(" " + t("MHz"))
-        self.sp_freq.setValue(5658.0)
+        # no setValue() here: _refresh_channels() -> _on_channel_changed() owns this
+        # field, and _build_ui() preselects the default channel (R1).
         self.cb_hw = QtWidgets.QComboBox()
         self.cb_hw.addItems(["hacked", "stock"])
         self.cb_hw.currentIndexChanged.connect(self._update_readouts)
@@ -194,7 +265,7 @@ class MainWindow(QtWidgets.QMainWindow):
         col.addWidget(gb_fr)
 
         # signal
-        gb_sig = QtWidgets.QGroupBox(t("Signal"))
+        self.gb_sig = gb_sig = QtWidgets.QGroupBox(t("Signal"))
         f = QtWidgets.QFormLayout(gb_sig)
         self.cb_std = QtWidgets.QComboBox()
         self.cb_std.addItems(list(STANDARDS.keys()))
@@ -242,6 +313,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.cb_mode.addItem(t("Manual carrier (static)"), None)
         for name in list_scenarios():
             self.cb_mode.addItem(t("Scenario: {name}", name=name), name)
+        # connect AFTER filling: the readout widgets do not exist yet while filling
+        self.cb_mode.currentIndexChanged.connect(self._on_mode_changed)
         v.addWidget(self.cb_mode)
         hb = QtWidgets.QHBoxLayout()
         self.btn_start = QtWidgets.QPushButton(t("▶ Start"))
@@ -386,12 +459,32 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_pattern_changed(self, pattern: str):
         self.preview.show_pattern(pattern)
-        if is_color_pattern(pattern) and self.sp_fs.value() < 18.0:
+        # never touch fs while transmitting: sp_fs is disabled, but setValue() would
+        # still work on it and the running signal would not follow
+        if (self.thread is None and is_color_pattern(pattern)
+                and self.sp_fs.value() < 18.0):
             # realistic FPV: 4.43 MHz subcarrier + wide bandwidth -> fs 20 MSPS
             self.sp_fs.setValue(20.0)
             self._log(t("[info] Color pattern — fs raised to 20 MSPS "
                         "(subcarrier + wide bandwidth)."))
+        self._sync_burst()
         self._update_readouts()   # bandwidth depends on the pattern (color is wider)
+
+    def _on_mode_changed(self, _index: int = 0):
+        """Manual <-> scenario: the scenario file owns the whole Signal group."""
+        self._set_running(self.thread is not None)
+        self._update_readouts()
+
+    def _sync_burst(self):
+        """«Color burst» is meaningless for color patterns — they always carry it."""
+        color = is_color_pattern(self.cb_pattern.currentText())
+        usable = (self.thread is None
+                  and self.cb_mode.currentData() is None
+                  and not color)
+        self.chk_burst.setEnabled(usable)
+        self.chk_burst.setToolTip(
+            t("Color patterns always transmit the burst and the chroma subcarrier — "
+              "this switch only affects black-and-white patterns.") if color else "")
 
     def _current_signal(self) -> dict:
         return {
@@ -403,28 +496,151 @@ class MainWindow(QtWidgets.QMainWindow):
             "color_burst": self.chk_burst.isChecked(),
         }
 
+    # -- scenario introspection (the readout must describe what really goes on air) --
+    def _selected_scenario(self) -> dict | None:
+        """The scenario picked in the Mode combo, or None for the manual carrier."""
+        name = self.cb_mode.currentData()
+        if name is None:
+            return None
+        try:
+            return load_scenario(list_scenarios()[name])
+        except Exception:   # noqa: BLE001 — a broken file must not blank the readout
+            return None
+
+    def _scenario_first_channel(self, stype: str, cfg: dict):
+        """(label, freq_hz) of the first frequency the scenario transmits on, or None."""
+        try:
+            if stype == "sweep":
+                if cfg.get("channels"):
+                    ch = self.bands.channel(cfg["channels"][0])
+                    return ch.name, ch.freq_hz
+                if cfg.get("band"):
+                    chans = self.bands.channels_in_band(cfg["band"])
+                    return (chans[0].name, chans[0].freq_hz) if chans else None
+                if cfg.get("group"):
+                    chans = self.bands.channels_in_group(cfg["group"])
+                    return (chans[0].name, chans[0].freq_hz) if chans else None
+                if cfg.get("freq_list_mhz"):
+                    f = float(cfg["freq_list_mhz"][0])
+                    return f"{f:.0f}MHz", f * 1e6
+                if cfg.get("ranges"):
+                    f = float(cfg["ranges"][0]["start_mhz"])
+                    return f"{f:.0f}MHz", f * 1e6
+                return None
+            key = "center_channel" if stype == "multi_drone" else "channel"
+            if cfg.get(key):
+                ch = self.bands.channel(cfg[key])
+                return ch.name, ch.freq_hz
+            if cfg.get("freq_mhz") is not None:
+                f = float(cfg["freq_mhz"])
+                return f"{f:.0f}MHz", f * 1e6
+        except Exception:   # noqa: BLE001
+            return None
+        return None
+
+    def _scenario_view(self, scen: dict) -> dict:
+        """What the scenario will actually transmit (mirrors SignalParams/ScenarioRunner)."""
+        sig = scen.get("signal") or {}
+        stype = str(scen.get("type", "static")).lower()
+        cfg = scen.get(stype) or {}
+        view = {
+            "standard": str(sig.get("standard", "PAL50")),
+            "pattern": str(sig.get("pattern", "color_bars")),
+            "fs": float(sig.get("sample_rate", 20e6)),
+            "dev": float(sig.get("deviation_pp_hz", 6e6)),
+            "offsets_hz": [],
+            "channel": None,
+            "freq_hz": None,
+        }
+        view["alias_patterns"] = [view["pattern"]]
+        if stype == "multi_drone":
+            drones = cfg.get("drones") or []
+            if drones:
+                # generate_multi_drone_iq() always uses the LUMA generator
+                pats = [str(d.get("pattern", view["pattern"])) for d in drones]
+                view["pattern"] = "+".join(pats)
+                view["alias_patterns"] = pats   # the joined name is not a real pattern
+                view["offsets_hz"] = [float(d.get("offset_mhz", 0.0)) * 1e6 for d in drones]
+        ref = self._scenario_first_channel(stype, cfg)
+        if ref:
+            view["channel"], view["freq_hz"] = ref
+        return view
+
+    def _alias_check(self, pattern: str, std, fs: float, dev: float,
+                     max_offset_hz: float = 0.0):
+        """(aliases, peak_hz) — via the shared generator helper when it is available."""
+        if _would_alias is not None:
+            try:
+                aliases, peak = _would_alias(pattern, std, fs, dev,
+                                             max_offset_hz=max_offset_hz)
+                return bool(aliases), float(peak)
+            except Exception:   # noqa: BLE001 — never let the readout die
+                pass
+        peak = dev / 2.0 + abs(max_offset_hz)
+        return peak > 0.45 * fs, peak
+
     def _update_readouts(self):
-        fs = self.sp_fs.value() * 1e6
-        dev = self.sp_dev.value() * 1e6
-        std = get_standard(self.cb_std.currentText())
+        scen = self._selected_scenario()
+        head: list[str] = []
+        offsets: list[float] = []
+        chan = None
+        if scen is None:
+            std_name = self.cb_std.currentText()
+            pattern = self.cb_pattern.currentText()
+            fs = self.sp_fs.value() * 1e6
+            dev = self.sp_dev.value() * 1e6
+            freq = self.sp_freq.value() * 1e6
+            alias_patterns = [pattern]
+        else:
+            view = self._scenario_view(scen)
+            std_name = view["standard"]
+            pattern = view["pattern"]
+            alias_patterns = view["alias_patterns"]
+            fs = view["fs"]
+            dev = view["dev"]
+            offsets = view["offsets_hz"]
+            chan = view["channel"]
+            # a scenario without a resolvable frequency still opens the sink on sp_freq
+            freq = view["freq_hz"] if view["freq_hz"] else self.sp_freq.value() * 1e6
+            head.append(t("Scenario «{name}» — values below come from the scenario file.",
+                          name=t(str(scen.get("name", "")))))
+        try:
+            std = get_standard(std_name)
+        except Exception:   # noqa: BLE001 — malformed scenario: keep the panel alive
+            std = get_standard(self.cb_std.currentText())
+
         n = int(round(std.line_us * 1e-6 * fs)) * std.total_lines
         mb = n * 4 / 1e6  # complex int16 = 4 bytes/sample
         # color patterns are wider because of the subcarrier — computed as in signal_gen
-        pattern = self.cb_pattern.currentText()
         video_bw = (std.color_subcarrier_hz + 1.0e6) if is_color_pattern(pattern) else 1.5e6
         bw = occupied_bandwidth_hz(dev, video_bw)
-        freq = self.sp_freq.value() * 1e6
+        max_offset = max((abs(o) for o in offsets), default=0.0)
+        if offsets:
+            bw += max(offsets) - min(offsets)   # multi-drone span, as in signal_gen
         ok, warn = self.bands.check_reachable(freq, self.cb_hw.currentText())
-        peak = dev / 2
-        alias = ("  " + t("⚠ ALIASING (raise fs)")) if peak > 0.45 * fs else ""
-        lines = [
-            t("Carrier:     {mhz} MHz", mhz=f"{freq/1e6:.1f}"),
+        aliases = any(self._alias_check(p, std, fs, dev, max_offset)[0]
+                      for p in alias_patterns)
+        alias = ("  " + t("⚠ ALIASING (raise fs)")) if aliases else ""
+
+        lines = list(head)
+        if chan:
+            lines.append(t("Carrier:     {mhz} MHz  ({ch})",
+                           mhz=f"{freq/1e6:.1f}", ch=chan))
+        else:
+            lines.append(t("Carrier:     {mhz} MHz", mhz=f"{freq/1e6:.1f}"))
+        if scen is not None:
+            lines.append(t("Signal:      {std} · {pattern} · deviation {dev} MHz pp",
+                           std=std.name, pattern=pattern, dev=f"{dev/1e6:.2f}"))
+        lines += [
             t("Frame:       {n} samples · {ms} ms · buffer ~{mb} MB",
               n=n, ms=f"{std.frame_period_s*1e3:.1f}", mb=f"{mb:.2f}"),
             t("Occupied bandwidth ~{bw} MHz (fs={fs} MSPS){alias}",
               bw=f"{bw/1e6:.1f}", fs=f"{fs/1e6:.1f}", alias=alias),
             t("Line rate:   {khz} kHz", khz=f"{std.line_rate_hz/1e3:.2f}"),
         ]
+        if bw > fs:
+            lines.append(t("⚠ Occupied bandwidth is wider than the sample rate — "
+                           "raise fs or lower the deviation."))
         if not ok:
             lines.append(f"⚠ {warn}")
         self.lbl_read.setText("\n".join(lines))
@@ -450,8 +666,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_backend_changed(self, name: str):
         soapy = (name == "soapy")
-        self.ed_device.setEnabled(soapy)
-        self.btn_devices.setEnabled(soapy)
+        running = self.thread is not None
+        self.ed_device.setEnabled(soapy and not running)
+        self.btn_devices.setEnabled(soapy and not running)
         if name == "null":
             self._log(t("[WARN] backend = null — dry run, nothing goes on air."))
         elif soapy:
@@ -459,6 +676,10 @@ class MainWindow(QtWidgets.QMainWindow):
                         "(e.g. driver=hackrf|lime|uhd). «List SDRs» shows what is available."))
 
     def _on_list_devices(self):
+        if self.thread is not None:
+            self.status.showMessage(
+                t("Not available while transmitting — press Stop first."), 4000)
+            return
         from fpv_emulator.backends import soapy_enumerate
         devs = soapy_enumerate()
         if not devs:
@@ -470,6 +691,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # -- actions ------------------------------------------------------------
     def _on_probe(self):
+        # the probe opens a SECOND adi.Pluto on the same URI and sweeps tx_lo over
+        # 70 MHz .. 6 GHz — it would drag the live carrier away while transmitting
+        if self.thread is not None:
+            self.status.showMessage(
+                t("Not available while transmitting — press Stop first."), 4000)
+            return
         from fpv_emulator.probe import probe
         self.status.showMessage(t("Probing Pluto…"))
         QtWidgets.QApplication.processEvents()
@@ -482,12 +709,23 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_start(self):
         if self.thread is not None:
             return
-        try:
-            scenario = self._build_scenario()
-            fs = float(scenario.get("signal", {}).get("sample_rate", self.sp_fs.value() * 1e6))
-            sink = self._make_sink(fs)
-        except Exception as exc:  # noqa: BLE001
-            self._log(t("[ERROR] {msg}", msg=exc))
+        # anything warned on the way to the sink must be visible (stderr is discarded
+        # under pythonw); warnings raised later, on the worker thread, come through
+        # the showwarning hook installed in __init__
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            failure = None
+            try:
+                scenario = self._build_scenario()
+                fs = float(scenario.get("signal", {}).get(
+                    "sample_rate", self.sp_fs.value() * 1e6))
+                sink = self._make_sink(fs)
+            except Exception as exc:  # noqa: BLE001
+                failure = exc
+        for w in caught:
+            self._log(t("[WARN] {msg}", msg=w.message))
+        if failure is not None:
+            self._log(t("[ERROR] {msg}", msg=failure))
             return
 
         self.thread = QtCore.QThread()
@@ -512,6 +750,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.thread.wait(2000)
         self.thread = None
         self.worker = None
+        self._close_attempts = 0
         self._set_running(False)
         self.status.showMessage(t("Stopped"), 3000)
 
@@ -534,17 +773,59 @@ class MainWindow(QtWidgets.QMainWindow):
         self.log.appendPlainText(msg)
 
     def _set_running(self, running: bool):
+        """Single source of truth for what the operator may touch right now."""
+        scenario_mode = self.cb_mode.currentData() is not None
         self.btn_start.setEnabled(not running)
         self.btn_stop.setEnabled(running)
-        for w in (self.cb_backend, self.ed_uri, self.ed_device, self.cb_mode,
-                  self.sp_fs, self.cb_std, self.sp_dev, self.cb_lang):
+        # frozen while on air: everything the running sink would NOT follow
+        for w in (self.cb_backend, self.ed_uri, self.cb_mode, self.cb_lang,
+                  self.btn_probe, self.sp_freq, self.cb_band, self.cb_channel):
             w.setEnabled(not running)
+        # these two are additionally soapy-only (see _on_backend_changed)
+        soapy = (self.cb_backend.currentText() == "soapy")
+        self.ed_device.setEnabled(soapy and not running)
+        self.btn_devices.setEnabled(soapy and not running)
+        # in scenario mode the YAML file owns the whole Signal group
+        manual_signal = (not running) and (not scenario_mode)
+        for w in (self.cb_std, self.cb_pattern, self.sp_fs, self.sp_dev):
+            w.setEnabled(manual_signal)
+        self.gb_sig.setToolTip(
+            t("The scenario file sets the standard, pattern, sample rate and "
+              "deviation. Choose «Manual carrier (static)» to set them by hand.")
+            if scenario_mode else "")
+        self._sync_burst()
 
     def closeEvent(self, ev: QtGui.QCloseEvent):
+        if self.thread is None:
+            self._remove_warning_hook()
+            ev.accept()
+            return
+
         self._on_stop()
-        if self.thread:
-            self.thread.quit()
-            self.thread.wait(2000)
+        self.thread.quit()
+        # the worker still has to leave sink.stop()/sink.close() — closing before that
+        # leaves the device claimed and can take the process down inside libiio
+        first = (self._close_attempts == 0)
+        if self.thread.wait(2000 if first else 100):
+            self.thread = None
+            self.worker = None
+            self._remove_warning_hook()
+            ev.accept()
+            return
+
+        self._close_attempts += 1
+        if self._close_attempts <= self._CLOSE_MAX_ATTEMPTS:
+            self.status.showMessage(
+                t("Stopping the transmission — the window will close once the "
+                  "device is released…"))
+            ev.ignore()
+            QtCore.QTimer.singleShot(200, self.close)
+            return
+
+        self._log(t("[WARN] The device was not released in time — closing anyway."))
+        self.thread = None
+        self.worker = None
+        self._remove_warning_hook()
         ev.accept()
 
 

@@ -16,7 +16,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo [1/3] Creating the .venv environment ...
+echo [1/4] Creating the .venv environment ...
 python -m venv .venv
 if errorlevel 1 (
     echo [!] Failed to create .venv
@@ -24,12 +24,31 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo [2/3] Upgrading pip ...
+echo [2/4] Upgrading pip ...
 ".venv\Scripts\python.exe" -m pip install --upgrade pip
 
-echo [3/3] Installing dependencies (numpy, PySide6, pyadi-iio ...) ...
+echo [3/4] Installing the core dependencies (numpy, PyYAML, PySide6) ...
 ".venv\Scripts\python.exe" -m pip install -r requirements.txt
+if errorlevel 1 (
+    echo.
+    echo [!] Dependency installation FAILED - see the errors above.
+    echo     Nothing was installed: pip aborts the whole requirements file when a
+    echo     single entry cannot be resolved. The GUI will not start like this.
+    echo     Fix the error - usually an unsupported Python version - and run setup.bat again.
+    echo.
+    pause
+    exit /b 1
+)
+
+echo [4/4] Installing the hardware dependencies (pyadi-iio, pylibiio) ...
 ".venv\Scripts\python.exe" -m pip install -r requirements-hw.txt
+if errorlevel 1 (
+    echo.
+    echo [i] The hardware dependencies were NOT installed - this is NOT fatal.
+    echo     The GUI, the CLI and the file/null backends work without them;
+    echo     only real transmission through Pluto+ needs pyadi-iio + pylibiio.
+    echo.
+)
 
 echo.
 echo ============================================================
