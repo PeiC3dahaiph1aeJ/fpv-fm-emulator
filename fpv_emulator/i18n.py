@@ -28,6 +28,8 @@ _lang = DEFAULT_LANGUAGE
 # Ukrainian catalog: English key -> Ukrainian text.
 # Keys must match the English strings used in the code exactly.
 CATALOG_UK: Dict[str, str] = {
+    "Pluto is reachable at {uri}, but opening it failed: {err}": "Pluto доступний за {uri}, але відкрити його не вдалося: {err}",
+    "Details (send this when reporting the problem):": "Подробиці (надішліть це, якщо повідомляєте про проблему):",
     "Aliasing risk: pattern '{pattern}' reaches a peak excursion of {peak} MHz, above 0.45*fs = {limit} MHz. Increase sample_rate or reduce the deviation/offsets.": "Ризик аліасингу: патерн '{pattern}' дає пікову екскурсію {peak} МГц, це вище за 0.45*fs = {limit} МГц. Підніміть sample_rate або зменшіть девіацію/зсуви.",
     "Block 'signal:' must be a mapping": "Блок 'signal:' має бути словником",
     "Block '{stype}:' must be a non-empty mapping": "Блок '{stype}:' має бути непорожнім словником",
