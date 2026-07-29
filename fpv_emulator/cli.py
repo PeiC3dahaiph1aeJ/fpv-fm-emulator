@@ -461,7 +461,10 @@ def build_parser() -> argparse.ArgumentParser:
                     help=t("how far the reported frequency may differ from ours"))
     pd.add_argument("--freq-mhz", required=True)
     pd.add_argument("--gain", default="-10")
-    pd.add_argument("--gap", default="3.0",
+    # 5 s: after the carrier goes the detector still holds the target for a while
+    # ("SEEK all 1 win LOST -> rescan") — starting a trial before it has released
+    # would measure a detector that was already triggered.
+    pd.add_argument("--gap", default="5.0",
                     help=t("silence between trials — long enough for the detector to release"))
     pd.add_argument("--offset-ms", default="0",
                     help=t("subtract our own command -> RF delay (see bench-tx)"))
