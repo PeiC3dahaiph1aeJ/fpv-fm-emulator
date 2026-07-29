@@ -28,6 +28,7 @@ _lang = DEFAULT_LANGUAGE
 # Ukrainian catalog: English key -> Ukrainian text.
 # Keys must match the English strings used in the code exactly.
 CATALOG_UK: Dict[str, str] = {
+    "The Pluto is busy — something else already owns its TX buffer. Usually the GUI is still transmitting (press Stop) or another run is open. Note that a second process can still WRITE tx_lo and the gain, so two owners silently fight over the radio and the measurement is meaningless. If nothing is running, a killed run left the buffer allocated: unplug the USB, wait ~10 s, plug it back in. ({err})": "Pluto зайнятий — його TX-буфер уже комусь належить. Зазвичай це GUI, який досі передає (натисніть «Стоп»), або інший відкритий прогін. Увага: другий процес усе одно МОЖЕ писати tx_lo і підсилення, тож два власники нишком борються за радіо, і вимірювання втрачає сенс. Якщо нічого не запущено — аварійно завершений прогін лишив буфер: вийміть USB, зачекайте ~10 с, встроміть назад. ({err})",
     "The device is busy: a previous run did not release the TX buffer. Unplug the Pluto USB, wait ~10 s and plug it back in. ({err})": "Пристрій зайнятий: попередній прогін не звільнив TX-буфер. Вийміть USB Pluto, зачекайте ~10 с і встроміть назад. ({err})",
     "Port {port} is busy — another program is holding it (a 'listen' session or a serial terminal). Close it and retry.": "Порт {port} зайнятий — його тримає інша програма (сеанс 'listen' або термінал). Закрийте її й повторіть.",
     "Cannot open port {port}: {err}": "Не вдалося відкрити порт {port}: {err}",

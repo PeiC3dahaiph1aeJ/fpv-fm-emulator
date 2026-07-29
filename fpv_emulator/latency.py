@@ -275,8 +275,12 @@ def measure_detection_latency(
         # allocated inside the device; every later attempt then fails with EBUSY
         # ("Open unlocked: -16") and no amount of retrying clears it.
         raise RuntimeError(
-            t("The device is busy: a previous run did not release the TX buffer. "
-              "Unplug the Pluto USB, wait ~10 s and plug it back in. ({err})",
+            t("The Pluto is busy — something else already owns its TX buffer. "
+              "Usually the GUI is still transmitting (press Stop) or another run is "
+              "open. Note that a second process can still WRITE tx_lo and the gain, "
+              "so two owners silently fight over the radio and the measurement is "
+              "meaningless. If nothing is running, a killed run left the buffer "
+              "allocated: unplug the USB, wait ~10 s, plug it back in. ({err})",
               err=str(exc))
         ) from exc
     try:
