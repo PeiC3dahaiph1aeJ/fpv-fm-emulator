@@ -9,3 +9,7 @@ out.*
 
 # приватні локальні сценарії з реальними параметрами детектора (не публікувати)
 config/scenarios/*_local.yaml
+
+# measurement output
+*.csv
+startup_error.log
