@@ -6,6 +6,7 @@ and the tests work without libiio-Python and without a device.
 """
 from __future__ import annotations
 
+import gc
 import os
 import threading
 import time
@@ -130,6 +131,22 @@ class PlutoSink(BaseSink):
             raise
         self._sdr = sdr
 
+    def _reopen(self) -> None:
+        """Drop the device context and open a fresh one.
+
+        ``del`` alone is not enough: the iio context lives until its last
+        reference goes, and a lingering one keeps the DMA bound to the previous
+        buffer, so gc.collect() is deliberate rather than superstition.
+        """
+        try:
+            self._sdr.tx_destroy_buffer()
+        except Exception:
+            pass
+        self._sdr = None
+        gc.collect()
+        time.sleep(0.3)
+        self._ensure_open()
+
     def _tx_is_playing(self) -> Optional[bool]:
         """Is the TX DMA actually playing the buffer?
 
@@ -180,6 +197,13 @@ class PlutoSink(BaseSink):
         """
         last: Optional[BaseException] = None
         for attempt in range(1, attempts + 1):
+            if attempt > 1:
+                # A retry on the same context keeps failing: observed in the field,
+                # the DMA stays attached to the previous run's buffer and a fresh
+                # tx() is accepted without ever starting. Dropping the context (and
+                # forcing the collection that actually frees the iio handles) is
+                # what clears it — that is why a manual restart used to "fix" it.
+                self._reopen()
             try:
                 self._sdr.tx_destroy_buffer()
             except Exception:
@@ -188,7 +212,7 @@ class PlutoSink(BaseSink):
                 self._sdr.tx(iq_int16)
             except Exception as exc:      # OSError/EBUSY and friends
                 last = exc
-                time.sleep(0.4 * attempt)
+                time.sleep(0.5 * attempt)
                 continue
             # tx() returning is not proof that anything is on air
             playing = self._tx_is_playing()
@@ -199,7 +223,7 @@ class PlutoSink(BaseSink):
                 t("tx() succeeded but the TX buffer is not playing (attempt {n})",
                   n=attempt)
             )
-            time.sleep(0.4 * attempt)
+            time.sleep(0.5 * attempt)
         self._running = False
         raise RuntimeError(
             t("The transmitter did not start after {n} attempts — the device is busy "
@@ -243,6 +267,10 @@ class PlutoSink(BaseSink):
     def close(self) -> None:
         self.stop()
         self._sdr = None
+        # free the iio context now rather than whenever the collector gets to it:
+        # the next Start opens a new one, and an overlapping pair is what leaves
+        # the DMA attached to the old buffer
+        gc.collect()
 
 
 # ---------------------------------------------------------------------------
