@@ -127,6 +127,137 @@ def cmd_list_devices(args) -> int:
     return 0
 
 
+def cmd_serial_ports(args) -> int:
+    from .logsource import list_serial_ports
+    ports = list_serial_ports()
+    if not ports:
+        print(t("No serial ports found (or pyserial is not installed)."))
+        return 0
+    print(t("Serial ports:"))
+    for p in ports:
+        print(f"  {p['device']:10s}  {p['description']}")
+    return 0
+
+
+def cmd_listen(args) -> int:
+    """Dump the detector's log with arrival timestamps — used to find the pattern."""
+    import time
+    from .logsource import SerialLogSource
+    src = SerialLogSource(args.port, int(args.baud))
+    print(t("Listening on {port} at {baud} baud — Ctrl+C to stop.",
+            port=args.port, baud=args.baud))
+    t0 = time.perf_counter()
+    try:
+        with src:
+            while True:
+                line = src.get(timeout=0.5)
+                err = src.poll_error()
+                if err is not None:
+                    print(t("[ERROR] {msg}", msg=str(err)), file=sys.stderr)
+                    return 1
+                if line is not None:
+                    print(f"  {(line.t - t0)*1e3:9.1f} ms  {line.text}")
+    except KeyboardInterrupt:
+        print("\n" + t("Stopping…"))
+    return 0
+
+
+def _latency_signal(args):
+    """Build the IQ buffer shared by the latency commands."""
+    std = get_standard(args.standard)
+    fs = float(args.sample_rate)
+    frame = generate_frame_iq(args.pattern, std, fs, float(args.deviation))
+    return to_int16_iq(frame.iq), fs, frame
+
+
+def cmd_bench_tx(args) -> int:
+    """command -> RF, witnessed by the Pluto's own receiver (no detector involved)."""
+    from .latency import bench_command_to_rf, format_summary, summarize, write_csv
+    buf, fs, frame = _latency_signal(args)
+    freq_hz = float(args.freq_mhz) * 1e6
+    print(t("Buffer: {n} samples = {mb} MB | {trials} trials @ {mhz} MHz",
+            n=buf.size, mb=f"{buf.size*4/1e6:.2f}", trials=args.trials,
+            mhz=f"{freq_hz/1e6:.0f}"))
+
+    def show(tr):
+        if tr.ok:
+            print(f"  #{tr.n:3d}  {tr.latency_s*1e3:8.2f} ms"
+                  f"   (upload {tr.upload_s*1e3:7.2f} + after {tr.post_arm_s*1e3:7.2f})")
+        else:
+            print(f"  #{tr.n:3d}  {tr.note}")
+
+    trials = bench_command_to_rf(
+        buf, args.uri, freq_hz, fs, trials=int(args.trials),
+        tx_gain_db=float(args.gain), rx_gain_db=float(args.rx_gain),
+        gap_s=float(args.gap), timeout_s=float(args.timeout), on_trial=show)
+    ok = [x for x in trials if x.ok]
+    print()
+    print(format_summary(t("command -> RF"), summarize([x.latency_s for x in ok]),
+                         len(trials) - len(ok)))
+    print(format_summary(t("  buffer upload"), summarize([x.upload_s for x in ok])))
+    print(format_summary(t("  after DMA armed"), summarize([x.post_arm_s for x in ok])))
+    if args.out:
+        write_csv(args.out, trials, {
+            "measurement": "command_to_rf", "uri": args.uri,
+            "freq_mhz": freq_hz / 1e6, "sample_rate": fs, "pattern": args.pattern,
+            "standard": args.standard, "tx_gain_db": args.gain,
+            "buffer_samples": buf.size,
+        })
+        print(t("Written: {path}", path=args.out))
+    return 0
+
+
+def cmd_latency(args) -> int:
+    """The real measurement: RF on -> the detector reports it, N times."""
+    import adi
+    from .latency import (format_summary, measure_detection_latency, summarize,
+                          write_csv)
+    from .logsource import SerialLogSource
+    buf, fs, frame = _latency_signal(args)
+    freq_hz = float(args.freq_mhz) * 1e6
+
+    sdr = adi.Pluto(uri=args.uri)
+    sdr.sample_rate = int(fs)
+    sdr.tx_rf_bandwidth = int(min(fs, 40e6))
+
+    src = SerialLogSource(args.port, int(args.baud))
+    print(t("Detector log: {port}@{baud} | pattern: {pattern}",
+            port=args.port, baud=args.baud, pattern=args.pattern_re))
+    print(t("{trials} trials @ {mhz} MHz, gain {gain} dB, gap {gap} s",
+            trials=args.trials, mhz=f"{freq_hz/1e6:.1f}", gain=args.gain, gap=args.gap))
+
+    def show(tr):
+        if tr.ok:
+            print(f"  #{tr.n:3d}  {tr.latency_s*1e3:8.1f} ms   {tr.matched_line[:70]}")
+        else:
+            print(f"  #{tr.n:3d}  {tr.note}")
+
+    try:
+        with src:
+            trials = measure_detection_latency(
+                sdr, buf, src, args.pattern_re, freq_hz,
+                tx_gain_db=float(args.gain), trials=int(args.trials),
+                timeout_s=float(args.timeout), gap_s=float(args.gap),
+                offset_s=float(args.offset_ms) / 1e3, on_trial=show)
+    finally:
+        del sdr
+
+    ok = [x for x in trials if x.ok]
+    print()
+    print(format_summary(t("DETECTION LATENCY"), summarize([x.latency_s for x in ok]),
+                         len(trials) - len(ok)))
+    if args.out:
+        write_csv(args.out, trials, {
+            "measurement": "detection_latency", "uri": args.uri, "port": args.port,
+            "pattern_re": args.pattern_re, "freq_mhz": freq_hz / 1e6,
+            "sample_rate": fs, "video_pattern": args.pattern,
+            "standard": args.standard, "tx_gain_db": args.gain,
+            "offset_ms": args.offset_ms, "gap_s": args.gap,
+        })
+        print(t("Written: {path}", path=args.out))
+    return 0
+
+
 def cmd_gen(args) -> int:
     std = get_standard(args.standard)
     fs = float(args.sample_rate)
@@ -265,6 +396,51 @@ def build_parser() -> argparse.ArgumentParser:
                    help=t("List scenarios")).set_defaults(func=cmd_list_scenarios)
     sub.add_parser("list-devices", parents=[lang_parent],
                    help=t("List SDRs via SoapySDR")).set_defaults(func=cmd_list_devices)
+
+    # ---- detection-latency measurements --------------------------------------
+    sub.add_parser("serial-ports", parents=[lang_parent],
+                   help=t("List serial ports")).set_defaults(func=cmd_serial_ports)
+
+    pl = sub.add_parser("listen", parents=[lang_parent],
+                        help=t("Print the detector log with arrival timestamps"))
+    pl.add_argument("--port", required=True, help=t("COM port, e.g. COM5"))
+    pl.add_argument("--baud", default="115200")
+    pl.set_defaults(func=cmd_listen)
+
+    def _signal_args(p):
+        p.add_argument("--pattern", default="color_bars", choices=list_all_patterns())
+        p.add_argument("--standard", default="PAL50")
+        p.add_argument("--sample-rate", default="20e6")
+        p.add_argument("--deviation", default="6e6")
+        p.add_argument("--uri", default="ip:192.168.2.1")
+        p.add_argument("--trials", default="20")
+        p.add_argument("--timeout", default="10")
+        p.add_argument("--out", default="", help=t("write the trials to this CSV"))
+
+    pb = sub.add_parser("bench-tx", parents=[lang_parent],
+                        help=t("Measure command -> RF using the Pluto's own receiver"))
+    _signal_args(pb)
+    pb.add_argument("--freq-mhz", default="2450",
+                    help=t("use a frequency where TX->RX leakage is strong"))
+    pb.add_argument("--gain", default="-10")
+    pb.add_argument("--rx-gain", default="40")
+    pb.add_argument("--gap", default="0.3")
+    pb.set_defaults(func=cmd_bench_tx)
+
+    pd = sub.add_parser("latency", parents=[lang_parent],
+                        help=t("Measure how long the detector takes to report the signal"))
+    _signal_args(pd)
+    pd.add_argument("--port", required=True, help=t("COM port of the detector, e.g. COM5"))
+    pd.add_argument("--baud", default="115200")
+    pd.add_argument("--pattern-re", required=True,
+                    help=t("regular expression marking a detection in the log"))
+    pd.add_argument("--freq-mhz", required=True)
+    pd.add_argument("--gain", default="-10")
+    pd.add_argument("--gap", default="3.0",
+                    help=t("silence between trials — long enough for the detector to release"))
+    pd.add_argument("--offset-ms", default="0",
+                    help=t("subtract our own command -> RF delay (see bench-tx)"))
+    pd.set_defaults(func=cmd_latency)
 
     pg = sub.add_parser("gen", parents=[lang_parent],
                         help=t("Generate IQ into a file (no hardware)"))

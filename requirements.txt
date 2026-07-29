@@ -7,3 +7,4 @@ PySide6-Essentials>=6.5
 
 # Tests (dev)
 pytest>=7.0
+pyserial>=3.5
