@@ -228,6 +228,8 @@ def measure_detection_latency(
     offset_s: float = 0.0,
     confirm_pattern: Optional[str] = None,
     freq_tol_mhz: float = 15.0,
+    release_pattern: Optional[str] = None,
+    release_timeout_s: float = 25.0,
     on_trial: Optional[Callable[[Trial], None]] = None,
     stop_flag: Optional[Callable[[], bool]] = None,
 ) -> List[Trial]:
@@ -268,6 +270,12 @@ def measure_detection_latency(
     sdr.tx_lo = int(freq_hz)
     sdr.tx_hardwaregain_chan0 = GAIN_OFF_DB
     sdr.tx_cyclic_buffer = True
+    # clear a buffer left by an earlier run before arming; skipping this is the
+    # usual reason the transmitter "does not always start"
+    try:
+        sdr.tx_destroy_buffer()
+    except Exception:
+        pass
     try:
         sdr.tx(iq_int16)                  # uploaded once, stays armed
     except OSError as exc:

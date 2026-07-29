@@ -1,0 +1,18 @@
+# measurement: detection_latency
+# uri: ip:192.168.2.1
+# port: COM5
+# pattern_re: >>>\s*VIDEO\s+(?P<mhz>\d+)\s*MHz
+# confirm_re: DETECTION_STARTED.*?(?P<mhz>\d{3,5})\s*MHz
+# freq_mhz: 1120.0
+# sample_rate: 20000000.0
+# video_pattern: color_bars
+# standard: PAL50
+# tx_gain_db: -10
+# offset_ms: 0
+# gap_s: 5
+n,ok,latency_s,confirm_s,upload_s,post_arm_s,freq_mhz,reported_mhz,note,matched_line,confirm_line
+1,False,,,0.0012265000259503722,,1120.0,,timeout,,
+2,False,,,0.0015055000549182296,,1120.0,,timeout,,
+3,False,,,0.0012011999497190118,,1120.0,,timeout,,
+4,False,,,0.0012098000152036548,,1120.0,,timeout,,
+5,False,,,0.0011607999913394451,,1120.0,,timeout,,

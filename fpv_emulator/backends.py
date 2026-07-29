@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional
@@ -117,6 +118,11 @@ class PlutoSink(BaseSink):
             sdr.tx_rf_bandwidth = rf_bw
             sdr.tx_hardwaregain_chan0 = float(self.cfg.gain_db)
             sdr.tx_cyclic_buffer = True
+            # Changing tx_lo makes the AD9361 recalibrate, and how long that takes
+            # depends on the frequency (VCO band selection). Arming the buffer in
+            # the middle of it can leave the DMA not running while tx() still
+            # returns success — the "it only starts on the third try" symptom.
+            time.sleep(0.25)
         except Exception:
             # Release the half-configured handle, otherwise the next attempt
             # finds the device busy and the real cause is masked.
@@ -124,16 +130,46 @@ class PlutoSink(BaseSink):
             raise
         self._sdr = sdr
 
+    def _arm(self, iq_int16: np.ndarray, attempts: int = 3) -> None:
+        """Push the cyclic buffer, clearing any stale one first, and retry.
+
+        Field symptom this fixes: "the transmitter does not always start"
+        (confirmed on a spectrum analyser). A buffer left allocated by an earlier
+        run — or by a run that was killed — makes tx() fail with EBUSY
+        ("Open unlocked: -16"). Destroying before arming removes that class of
+        failure, and the retry covers a device that needs a moment to settle.
+        Silence is the real danger here: a transmitter that quietly does nothing
+        makes every measurement taken afterwards wrong, so a failure to arm must
+        raise rather than leave _running set.
+        """
+        last: Optional[BaseException] = None
+        for attempt in range(1, attempts + 1):
+            try:
+                self._sdr.tx_destroy_buffer()
+            except Exception:
+                pass                      # nothing to clear — normal on a fresh start
+            try:
+                self._sdr.tx(iq_int16)
+                self._running = True
+                return
+            except Exception as exc:      # OSError/EBUSY and friends
+                last = exc
+                time.sleep(0.4 * attempt)
+        self._running = False
+        raise RuntimeError(
+            t("The transmitter did not start after {n} attempts — the device is busy "
+              "or in a stale state. Close anything else using the Pluto (the GUI, "
+              "another run); if nothing is, unplug the USB, wait ~10 s and plug it "
+              "back in. ({err})", n=attempts, err=str(last))
+        )
+
     def start(self, iq_int16: np.ndarray) -> None:
         self._ensure_open()
-        self._sdr.tx(iq_int16)
-        self._running = True
+        self._arm(iq_int16)
 
     def reload(self, iq_int16: np.ndarray) -> None:
         self._ensure_open()
-        self._sdr.tx_destroy_buffer()
-        self._sdr.tx(iq_int16)
-        self._running = True
+        self._arm(iq_int16)
 
     def set_freq(self, freq_hz: float) -> None:
         self.cfg.freq_hz = freq_hz
