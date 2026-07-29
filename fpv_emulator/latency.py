@@ -268,7 +268,17 @@ def measure_detection_latency(
     sdr.tx_lo = int(freq_hz)
     sdr.tx_hardwaregain_chan0 = GAIN_OFF_DB
     sdr.tx_cyclic_buffer = True
-    sdr.tx(iq_int16)                      # uploaded once, stays armed
+    try:
+        sdr.tx(iq_int16)                  # uploaded once, stays armed
+    except OSError as exc:
+        # A run that was killed (rather than stopped) leaves the cyclic buffer
+        # allocated inside the device; every later attempt then fails with EBUSY
+        # ("Open unlocked: -16") and no amount of retrying clears it.
+        raise RuntimeError(
+            t("The device is busy: a previous run did not release the TX buffer. "
+              "Unplug the Pluto USB, wait ~10 s and plug it back in. ({err})",
+              err=str(exc))
+        ) from exc
     try:
         for i in range(1, trials + 1):
             if stop_flag and stop_flag():

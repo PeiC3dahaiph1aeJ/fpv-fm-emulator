@@ -234,16 +234,32 @@ def _cmd_latency(args) -> int:
     print(t("{trials} trials @ {mhz} MHz, gain {gain} dB, gap {gap} s",
             trials=args.trials, mhz=f"{freq_hz/1e6:.1f}", gain=args.gain, gap=args.gap))
 
+    done: list = []
+    csv_meta = {
+        "measurement": "detection_latency", "uri": args.uri, "port": args.port,
+        "pattern_re": args.pattern_re, "confirm_re": args.confirm_re,
+        "freq_mhz": freq_hz / 1e6, "sample_rate": fs,
+        "video_pattern": args.pattern, "standard": args.standard,
+        "tx_gain_db": args.gain, "offset_ms": args.offset_ms, "gap_s": args.gap,
+    }
+
     def show(tr):
         if not tr.ok:
-            print(f"  #{tr.n:3d}  {tr.note}")
-            return
-        line = f"  #{tr.n:3d}  video {tr.latency_s:7.3f} s"
-        if tr.confirm_s is not None:
-            line += f"   confirmed {tr.confirm_s:7.3f} s"
-        if tr.reported_mhz:
-            line += f"   @{tr.reported_mhz:.0f} MHz"
-        print(line)
+            line = f"  #{tr.n:3d}  {tr.note}"
+        else:
+            line = f"  #{tr.n:3d}  video {tr.latency_s:7.3f} s"
+            if tr.confirm_s is not None:
+                line += f"   confirmed {tr.confirm_s:7.3f} s"
+            if tr.reported_mhz:
+                line += f"   @{tr.reported_mhz:.0f} MHz"
+        # flush: a run takes minutes and its output is usually redirected, where
+        # python block-buffers stdout and the operator sees nothing until the end
+        print(line, flush=True)
+        # rewrite the CSV after every trial — losing a 10-minute run to a late
+        # error would be worse than the cost of rewriting 30 rows
+        done.append(tr)
+        if args.out:
+            write_csv(args.out, done, csv_meta)
 
     try:
         with src:
@@ -267,13 +283,7 @@ def _cmd_latency(args) -> int:
     print(t("Note: a sweeping detector adds where-in-the-sweep it was, so the spread "
             "reflects the sweep period rather than measurement noise."))
     if args.out:
-        write_csv(args.out, trials, {
-            "measurement": "detection_latency", "uri": args.uri, "port": args.port,
-            "pattern_re": args.pattern_re, "freq_mhz": freq_hz / 1e6,
-            "sample_rate": fs, "video_pattern": args.pattern,
-            "standard": args.standard, "tx_gain_db": args.gain,
-            "offset_ms": args.offset_ms, "gap_s": args.gap,
-        })
+        write_csv(args.out, trials, csv_meta)   # final rewrite, complete set
         print(t("Written: {path}", path=args.out))
     return 0
 
