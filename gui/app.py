@@ -706,9 +706,21 @@ class MainWindow(QtWidgets.QMainWindow):
             self.cb_hw.setCurrentText(res.inferred_preset)
         self.status.showMessage(t("Probe finished"), 4000)
 
+    def _commit_spin_edits(self) -> None:
+        """Force every spin box to accept what is typed in it.
+
+        A QDoubleSpinBox only turns its edit text into a value when editing ends
+        (focus change, Enter). Pressing Start with the caret still in the field
+        would otherwise transmit the PREVIOUS frequency while the box shows the
+        new one — indistinguishable, from the outside, from "it did not start".
+        """
+        for box in (self.sp_freq, self.sp_fs, self.sp_dev):
+            box.interpretText()
+
     def _on_start(self):
         if self.thread is not None:
             return
+        self._commit_spin_edits()
         # anything warned on the way to the sink must be visible (stderr is discarded
         # under pythonw); warnings raised later, on the worker thread, come through
         # the showwarning hook installed in __init__

@@ -130,6 +130,42 @@ class PlutoSink(BaseSink):
             raise
         self._sdr = sdr
 
+    def _tx_is_playing(self) -> Optional[bool]:
+        """Is the TX DMA actually playing the buffer?
+
+        tx() can return success while the DMA never starts — the transmitter then
+        stays silent and nothing in the logs says so, which makes every later
+        measurement wrong. Digital loopback answers it directly and, unlike
+        listening for RF leakage, works at any frequency: with loopback on, the
+        receiver gets the transmit stream itself, so samples flowing means the
+        buffer really is playing.
+
+        Returns None when the check cannot be performed (then trust tx()).
+        """
+        sdr = self._sdr
+        try:
+            old_loop = sdr.loopback
+            old_mode = sdr.gain_control_mode_chan0
+            old_size = sdr.rx_buffer_size
+            sdr.rx_lo = int(self.cfg.freq_hz)
+            sdr.gain_control_mode_chan0 = "manual"
+            sdr.rx_hardwaregain_chan0 = 20.0
+            sdr.rx_buffer_size = 4096
+            sdr.loopback = 1
+            try:
+                for _ in range(3):
+                    sdr.rx()                      # flush stale buffers
+                power = float(np.mean(np.abs(sdr.rx()) ** 2))
+            finally:
+                sdr.loopback = old_loop
+                sdr.gain_control_mode_chan0 = old_mode
+                sdr.rx_buffer_size = old_size
+        except Exception:
+            return None                            # cannot tell — do not block TX
+        # a stopped DMA loops back essentially nothing; a playing one is orders
+        # of magnitude above it
+        return power > 1e4
+
     def _arm(self, iq_int16: np.ndarray, attempts: int = 3) -> None:
         """Push the cyclic buffer, clearing any stale one first, and retry.
 
@@ -150,11 +186,20 @@ class PlutoSink(BaseSink):
                 pass                      # nothing to clear — normal on a fresh start
             try:
                 self._sdr.tx(iq_int16)
-                self._running = True
-                return
             except Exception as exc:      # OSError/EBUSY and friends
                 last = exc
                 time.sleep(0.4 * attempt)
+                continue
+            # tx() returning is not proof that anything is on air
+            playing = self._tx_is_playing()
+            if playing is not False:      # True, or "cannot tell"
+                self._running = True
+                return
+            last = RuntimeError(
+                t("tx() succeeded but the TX buffer is not playing (attempt {n})",
+                  n=attempt)
+            )
+            time.sleep(0.4 * attempt)
         self._running = False
         raise RuntimeError(
             t("The transmitter did not start after {n} attempts — the device is busy "
