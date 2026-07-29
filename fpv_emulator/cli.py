@@ -227,10 +227,15 @@ def cmd_latency(args) -> int:
             trials=args.trials, mhz=f"{freq_hz/1e6:.1f}", gain=args.gain, gap=args.gap))
 
     def show(tr):
-        if tr.ok:
-            print(f"  #{tr.n:3d}  {tr.latency_s*1e3:8.1f} ms   {tr.matched_line[:70]}")
-        else:
+        if not tr.ok:
             print(f"  #{tr.n:3d}  {tr.note}")
+            return
+        line = f"  #{tr.n:3d}  video {tr.latency_s:7.3f} s"
+        if tr.confirm_s is not None:
+            line += f"   confirmed {tr.confirm_s:7.3f} s"
+        if tr.reported_mhz:
+            line += f"   @{tr.reported_mhz:.0f} MHz"
+        print(line)
 
     try:
         with src:
@@ -238,14 +243,21 @@ def cmd_latency(args) -> int:
                 sdr, buf, src, args.pattern_re, freq_hz,
                 tx_gain_db=float(args.gain), trials=int(args.trials),
                 timeout_s=float(args.timeout), gap_s=float(args.gap),
-                offset_s=float(args.offset_ms) / 1e3, on_trial=show)
+                offset_s=float(args.offset_ms) / 1e3,
+                confirm_pattern=(args.confirm_re or None),
+                freq_tol_mhz=float(args.freq_tol_mhz), on_trial=show)
     finally:
         del sdr
 
     ok = [x for x in trials if x.ok]
+    conf = [x.confirm_s for x in ok if x.confirm_s is not None]
     print()
-    print(format_summary(t("DETECTION LATENCY"), summarize([x.latency_s for x in ok]),
+    print(format_summary(t("VIDEO ACQUIRED"), summarize([x.latency_s for x in ok]),
                          len(trials) - len(ok)))
+    if conf:
+        print(format_summary(t("DETECTION CONFIRMED"), summarize(conf)))
+    print(t("Note: a sweeping detector adds where-in-the-sweep it was, so the spread "
+            "reflects the sweep period rather than measurement noise."))
     if args.out:
         write_csv(args.out, trials, {
             "measurement": "detection_latency", "uri": args.uri, "port": args.port,
@@ -432,8 +444,21 @@ def build_parser() -> argparse.ArgumentParser:
     _signal_args(pd)
     pd.add_argument("--port", required=True, help=t("COM port of the detector, e.g. COM5"))
     pd.add_argument("--baud", default="115200")
-    pd.add_argument("--pattern-re", required=True,
-                    help=t("regular expression marking a detection in the log"))
+    # Defaults match the "Kazhan"-style ESP-IDF log:
+    #   W (201094) scan_eng: >>> VIDEO 3240 MHz: pulses=31/10 conf=100% line=15.625kHz
+    #   W (206404) Detector: DETECTION_STARTED 3G 3239 MHz (3230-3240)
+    # The (?P<mhz>...) group lets the runner reject hits on other frequencies —
+    # a sweeping detector prints candidates across the whole band.
+    pd.add_argument("--pattern-re", default=r">>>\s*VIDEO\s+(?P<mhz>\d+)\s*MHz",
+                    help=t("regular expression marking video acquisition; capture the "
+                           "frequency as (?P<mhz>...) to reject other channels"))
+    # NB: the band token ("3G") sits between the marker and the frequency, so a
+    # \D* separator would not get past it — hence the non-greedy .*?
+    pd.add_argument("--confirm-re",
+                    default=r"DETECTION_STARTED.*?(?P<mhz>\d{3,5})\s*MHz",
+                    help=t("second marker: confirmed detection (empty = only the first)"))
+    pd.add_argument("--freq-tol-mhz", default="20",
+                    help=t("how far the reported frequency may differ from ours"))
     pd.add_argument("--freq-mhz", required=True)
     pd.add_argument("--gain", default="-10")
     pd.add_argument("--gap", default="3.0",

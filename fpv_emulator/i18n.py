@@ -28,6 +28,12 @@ _lang = DEFAULT_LANGUAGE
 # Ukrainian catalog: English key -> Ukrainian text.
 # Keys must match the English strings used in the code exactly.
 CATALOG_UK: Dict[str, str] = {
+    "regular expression marking video acquisition; capture the frequency as (?P<mhz>...) to reject other channels": "регулярний вираз, що позначає захоплення відео; частоту ловіть як (?P<mhz>...), щоб відкидати чужі канали",
+    "second marker: confirmed detection (empty = only the first)": "друга мітка: підтверджене виявлення (порожньо = лише перша)",
+    "how far the reported frequency may differ from ours": "наскільки заявлена частота може відрізнятися від нашої",
+    "VIDEO ACQUIRED": "ВІДЕО ЗАХОПЛЕНО",
+    "DETECTION CONFIRMED": "ВИЯВЛЕННЯ ПІДТВЕРДЖЕНО",
+    "Note: a sweeping detector adds where-in-the-sweep it was, so the spread reflects the sweep period rather than measurement noise.": "Зауваження: детектор сканує, тож розкид відображає період свіпу, а не похибку вимірювання.",
     "pyserial is not installed. Install it with: pip install pyserial": "pyserial не встановлено. Встановіть: pip install pyserial",
     "No serial ports found (or pyserial is not installed).": "Послідовних портів не знайдено (або pyserial не встановлено).",
     "Serial ports:": "Послідовні порти:",

@@ -46,12 +46,25 @@ class Trial:
 
     n: int
     ok: bool
-    latency_s: Optional[float] = None      # command -> event
+    latency_s: Optional[float] = None      # command -> event (video acquired)
+    confirm_s: Optional[float] = None      # command -> confirmed detection
     upload_s: Optional[float] = None       # command -> buffer armed
     post_arm_s: Optional[float] = None     # buffer armed -> event
     freq_mhz: Optional[float] = None
+    reported_mhz: Optional[float] = None   # frequency the detector named
     note: str = ""
     matched_line: str = ""
+    confirm_line: str = ""
+
+
+def _line_freq_mhz(match: "re.Match") -> Optional[float]:
+    """Frequency the detector named, if the pattern captured an ``mhz`` group."""
+    if "mhz" not in (match.re.groupindex or {}):
+        return None
+    try:
+        return float(match.group("mhz"))
+    except (TypeError, ValueError):
+        return None
 
 
 def summarize(values: Sequence[float]) -> Dict[str, float]:
@@ -213,6 +226,8 @@ def measure_detection_latency(
     gap_s: float = 3.0,
     settle_s: float = 0.2,
     offset_s: float = 0.0,
+    confirm_pattern: Optional[str] = None,
+    freq_tol_mhz: float = 15.0,
     on_trial: Optional[Callable[[Trial], None]] = None,
     stop_flag: Optional[Callable[[], bool]] = None,
 ) -> List[Trial]:
@@ -234,7 +249,21 @@ def measure_detection_latency(
     there (see :func:`bench_command_to_rf`) to describe the detector alone.
     """
     rx = re.compile(pattern, re.IGNORECASE)
+    rx_confirm = re.compile(confirm_pattern, re.IGNORECASE) if confirm_pattern else None
+    tx_mhz = freq_hz / 1e6
     out: List[Trial] = []
+
+    def freq_ok(m) -> bool:
+        """Reject a hit the detector reported on a different frequency.
+
+        A sweeping detector prints candidates across the band (2780, 3230, 4200 …)
+        and some are spurious; without this check a trial would end on somebody
+        else's signal and report a latency that never happened.
+        """
+        got = _line_freq_mhz(m)
+        if got is None:
+            return True                      # pattern captured no frequency
+        return abs(got - tx_mhz) <= freq_tol_mhz
 
     sdr.tx_lo = int(freq_hz)
     sdr.tx_hardwaregain_chan0 = GAIN_OFF_DB
@@ -255,7 +284,7 @@ def measure_detection_latency(
             t_armed = time.perf_counter()
 
             deadline = t0 + timeout_s
-            tr = Trial(n=i, ok=False, freq_mhz=freq_hz / 1e6,
+            tr = Trial(n=i, ok=False, freq_mhz=tx_mhz,
                        upload_s=t_armed - t0, note="timeout")
             while True:
                 remaining = deadline - time.perf_counter()
@@ -267,14 +296,27 @@ def measure_detection_latency(
                         tr.note = "stopped"
                         break
                     continue
-                if rx.search(line.text):
-                    tr = Trial(n=i, ok=True, freq_mhz=freq_hz / 1e6,
-                               latency_s=(line.t - t0) - offset_s,
-                               upload_s=t_armed - t0,
-                               post_arm_s=line.t - t_armed,
-                               matched_line=line.text[:160],
-                               note=("offset_subtracted" if offset_s else ""))
-                    break
+
+                if not tr.ok:
+                    m = rx.search(line.text)
+                    if m and freq_ok(m):
+                        tr = Trial(n=i, ok=True, freq_mhz=tx_mhz,
+                                   latency_s=(line.t - t0) - offset_s,
+                                   upload_s=t_armed - t0,
+                                   post_arm_s=line.t - t_armed,
+                                   reported_mhz=_line_freq_mhz(m),
+                                   matched_line=line.text[:160],
+                                   note=("offset_subtracted" if offset_s else ""))
+                        if rx_confirm is None:
+                            break
+                        continue          # keep waiting for the confirmed event
+
+                if rx_confirm is not None and tr.ok and tr.confirm_s is None:
+                    mc = rx_confirm.search(line.text)
+                    if mc and freq_ok(mc):
+                        tr.confirm_s = (line.t - t0) - offset_s
+                        tr.confirm_line = line.text[:160]
+                        break
             out.append(tr)
             if on_trial:
                 on_trial(tr)
