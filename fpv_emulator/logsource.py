@@ -136,7 +136,21 @@ class SerialLogSource(LogSource):
                 t("pyserial is not installed. Install it with: pip install pyserial")
             ) from exc
         # small timeout: we poll often so a line is timestamped close to its arrival
-        self._ser = serial.Serial(self.port, self.baud, timeout=self.read_timeout)
+        try:
+            self._ser = serial.Serial(self.port, self.baud, timeout=self.read_timeout)
+        except serial.SerialException as exc:
+            # A COM port admits exactly one process. The usual cause is a `listen`
+            # session or a terminal monitor still holding it — say so instead of
+            # dumping a traceback about access rights.
+            if "denied" in str(exc).lower() or "access" in str(exc).lower():
+                raise RuntimeError(
+                    t("Port {port} is busy — another program is holding it "
+                      "(a 'listen' session or a serial terminal). Close it and retry.",
+                      port=self.port)
+                ) from exc
+            raise RuntimeError(
+                t("Cannot open port {port}: {err}", port=self.port, err=str(exc))
+            ) from exc
 
     def _read_chunk(self) -> str:
         n = self._ser.in_waiting or 1

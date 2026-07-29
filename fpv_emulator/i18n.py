@@ -28,6 +28,8 @@ _lang = DEFAULT_LANGUAGE
 # Ukrainian catalog: English key -> Ukrainian text.
 # Keys must match the English strings used in the code exactly.
 CATALOG_UK: Dict[str, str] = {
+    "Port {port} is busy — another program is holding it (a 'listen' session or a serial terminal). Close it and retry.": "Порт {port} зайнятий — його тримає інша програма (сеанс 'listen' або термінал). Закрийте її й повторіть.",
+    "Cannot open port {port}: {err}": "Не вдалося відкрити порт {port}: {err}",
     "regular expression marking video acquisition; capture the frequency as (?P<mhz>...) to reject other channels": "регулярний вираз, що позначає захоплення відео; частоту ловіть як (?P<mhz>...), щоб відкидати чужі канали",
     "second marker: confirmed detection (empty = only the first)": "друга мітка: підтверджене виявлення (порожньо = лише перша)",
     "how far the reported frequency may differ from ours": "наскільки заявлена частота може відрізнятися від нашої",

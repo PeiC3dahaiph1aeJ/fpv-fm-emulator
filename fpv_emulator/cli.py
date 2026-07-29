@@ -208,6 +208,14 @@ def cmd_bench_tx(args) -> int:
 
 
 def cmd_latency(args) -> int:
+    try:
+        return _cmd_latency(args)
+    except RuntimeError as exc:
+        print(t("[ERROR] {msg}", msg=str(exc)), file=sys.stderr)
+        return 1
+
+
+def _cmd_latency(args) -> int:
     """The real measurement: RF on -> the detector reports it, N times."""
     import adi
     from .latency import (format_summary, measure_detection_latency, summarize,
