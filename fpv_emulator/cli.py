@@ -222,7 +222,8 @@ def _cmd_latency(args) -> int:
                           write_csv)
     from .logsource import SerialLogSource
     buf, fs, frame = _latency_signal(args)
-    freq_hz = float(args.freq_mhz) * 1e6
+    freq_list = [float(x) * 1e6 for x in args.freq_list.split(",") if x.strip()]
+    freq_hz = freq_list[0] if freq_list else float(args.freq_mhz) * 1e6
 
     sdr = adi.Pluto(uri=args.uri)
     sdr.sample_rate = int(fs)
@@ -269,7 +270,10 @@ def _cmd_latency(args) -> int:
                 timeout_s=float(args.timeout), gap_s=float(args.gap),
                 offset_s=float(args.offset_ms) / 1e3,
                 confirm_pattern=(args.confirm_re or None),
-                freq_tol_mhz=float(args.freq_tol_mhz), on_trial=show)
+                freq_tol_mhz=float(args.freq_tol_mhz),
+                release_pattern=(args.release_re or None),
+                gap_jitter_s=float(args.gap_jitter),
+                freq_list_hz=freq_list, on_trial=show)
     finally:
         del sdr
 
@@ -477,13 +481,25 @@ def build_parser() -> argparse.ArgumentParser:
                     help=t("second marker: confirmed detection (empty = only the first)"))
     pd.add_argument("--freq-tol-mhz", default="20",
                     help=t("how far the reported frequency may differ from ours"))
-    pd.add_argument("--freq-mhz", required=True)
+    pd.add_argument("--freq-mhz", default="0",
+                    help=t("single carrier, MHz (ignored when --freq-list is given)"))
     pd.add_argument("--gain", default="-10")
     # 5 s: after the carrier goes the detector still holds the target for a while
     # ("SEEK all 1 win LOST -> rescan") — starting a trial before it has released
     # would measure a detector that was already triggered.
+    pd.add_argument("--freq-list", default="",
+                    help=t("cycle across several carriers, MHz, comma separated "
+                           "(overrides --freq-mhz)"))
     pd.add_argument("--gap", default="5.0",
                     help=t("silence between trials — long enough for the detector to release"))
+    # A sweeping detector plus a fixed cycle lands on nearly the same sweep phase
+    # every trial, so the run measures one phase and looks far more repeatable than
+    # the detector is. Randomising the pause over a whole sweep period fixes it.
+    pd.add_argument("--gap-jitter", default="7.0",
+                    help=t("random extra pause, 0..N s — must cover one sweep period"))
+    pd.add_argument("--release-re", default=r"DETECTION_LOST|rescan",
+                    help=t("line meaning the detector dropped the target; the next "
+                           "trial waits for it instead of guessing with a fixed pause"))
     pd.add_argument("--offset-ms", default="0",
                     help=t("subtract our own command -> RF delay (see bench-tx)"))
     pd.set_defaults(func=cmd_latency)

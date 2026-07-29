@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import csv
 import os
+import random
 import re
 import statistics
 import time
@@ -230,6 +231,8 @@ def measure_detection_latency(
     freq_tol_mhz: float = 15.0,
     release_pattern: Optional[str] = None,
     release_timeout_s: float = 25.0,
+    gap_jitter_s: float = 0.0,
+    freq_list_hz: Optional[Sequence[float]] = None,
     on_trial: Optional[Callable[[Trial], None]] = None,
     stop_flag: Optional[Callable[[], bool]] = None,
 ) -> List[Trial]:
@@ -252,7 +255,9 @@ def measure_detection_latency(
     """
     rx = re.compile(pattern, re.IGNORECASE)
     rx_confirm = re.compile(confirm_pattern, re.IGNORECASE) if confirm_pattern else None
-    tx_mhz = freq_hz / 1e6
+    rx_release = re.compile(release_pattern, re.IGNORECASE) if release_pattern else None
+    freqs = list(freq_list_hz) if freq_list_hz else [freq_hz]
+    tx_mhz = freqs[0] / 1e6                  # updated per trial below
     out: List[Trial] = []
 
     def freq_ok(m) -> bool:
@@ -266,6 +271,26 @@ def measure_detection_latency(
         if got is None:
             return True                      # pattern captured no frequency
         return abs(got - tx_mhz) <= freq_tol_mhz
+
+    def wait_until_released(deadline_s: float) -> bool:
+        """Block until the detector says it dropped the target.
+
+        Once it finds something the detector parks on it and stops sweeping — and
+        while parked it no longer prints the acquisition line at all. Starting the
+        next trial then measures a detector that is already triggered (or never
+        reports). Waiting for its own release message is the only reliable
+        synchronisation; a fixed sleep is a guess.
+        """
+        if rx_release is None:
+            return True
+        end = time.perf_counter() + deadline_s
+        while time.perf_counter() < end:
+            line = source.get(timeout=min(0.25, max(0.01, end - time.perf_counter())))
+            if line is not None and rx_release.search(line.text):
+                return True
+            if stop_flag and stop_flag():
+                return False
+        return False                          # timed out: proceed anyway, note it
 
     sdr.tx_lo = int(freq_hz)
     sdr.tx_hardwaregain_chan0 = GAIN_OFF_DB
@@ -297,9 +322,22 @@ def measure_detection_latency(
                 break
             # --- silence, so the detector releases the previous target ---------
             sdr.tx_hardwaregain_chan0 = GAIN_OFF_DB
+            released = wait_until_released(release_timeout_s)
             time.sleep(gap_s)
+            # Jitter the pause over at least one sweep period. Without it a fixed
+            # cycle lands on nearly the same phase of the detector's sweep every
+            # time, so the run measures one phase instead of the distribution and
+            # looks far more repeatable than the detector really is.
+            if gap_jitter_s > 0:
+                time.sleep(random.uniform(0.0, gap_jitter_s))
+
+            # retune while the carrier is muted, then let the LO settle
+            freq_hz = freqs[(i - 1) % len(freqs)]
+            tx_mhz = freq_hz / 1e6
+            sdr.tx_lo = int(freq_hz)
+            time.sleep(max(settle_s, 0.25))
+
             source.drain()                # discard anything from the previous trial
-            time.sleep(settle_s)
 
             t0 = time.perf_counter()
             sdr.tx_hardwaregain_chan0 = float(tx_gain_db)
@@ -307,7 +345,8 @@ def measure_detection_latency(
 
             deadline = t0 + timeout_s
             tr = Trial(n=i, ok=False, freq_mhz=tx_mhz,
-                       upload_s=t_armed - t0, note="timeout")
+                       upload_s=t_armed - t0,
+                       note="timeout" if released else "timeout;not-released")
             while True:
                 remaining = deadline - time.perf_counter()
                 if remaining <= 0:

@@ -170,3 +170,49 @@ def test_offset_is_subtracted_from_the_result():
 def test_a_silent_detector_times_out_instead_of_hanging():
     _, trials = _run([])
     assert not trials[0].ok and trials[0].note == "timeout"
+
+
+# --------------------------- multi-frequency + jitter ----------------------
+def _video_line(mhz):
+    return f"W (1) scan_eng: >>> VIDEO {mhz} MHz: conf=100% line=15.625kHz dom=64"
+
+
+def test_trials_cycle_through_the_frequency_list():
+    """Each trial retunes; a hit is credited to the carrier that trial used."""
+    freqs = [980e6, 1200e6, 1400e6, 1700e6]
+    sdr = FakeSdr()
+    log = FakeLog([(0.01, _video_line(int(f / 1e6))) for f in freqs])
+    log.arm(sdr)
+    trials = measure_detection_latency(
+        sdr, np.zeros(8, dtype=np.complex64), log, VIDEO_RE, freqs[0],
+        trials=4, timeout_s=2.0, gap_s=0.01, settle_s=0.0, freq_list_hz=freqs)
+    assert [t.freq_mhz for t in trials] == [980.0, 1200.0, 1400.0, 1700.0]
+    assert [t.reported_mhz for t in trials] == [980.0, 1200.0, 1400.0, 1700.0]
+    assert all(t.ok for t in trials)
+    assert sdr.uploads == 1, "the buffer must be uploaded once, not per trial"
+
+
+def test_a_hit_on_the_previous_carrier_is_rejected_after_retuning():
+    """Cycling makes stale lines dangerous: 980 MHz must not close a 1400 MHz trial."""
+    sdr = FakeSdr()
+    log = FakeLog([(0.01, _video_line(980)), (0.05, _video_line(1400))])
+    log.arm(sdr)
+    trials = measure_detection_latency(
+        sdr, np.zeros(8, dtype=np.complex64), log, VIDEO_RE, 1400e6,
+        trials=1, timeout_s=2.0, gap_s=0.01, settle_s=0.0, freq_tol_mhz=20.0)
+    assert trials[0].ok and trials[0].reported_mhz == 1400.0
+
+
+def test_jitter_makes_the_pause_vary():
+    """A fixed cycle would sample one phase of the detector's sweep every time."""
+    durations = []
+    for _ in range(4):
+        sdr = FakeSdr()
+        log = FakeLog([(0.0, _video_line(1200))])
+        log.arm(sdr)
+        t0 = time.perf_counter()
+        measure_detection_latency(
+            sdr, np.zeros(8, dtype=np.complex64), log, VIDEO_RE, 1200e6,
+            trials=1, timeout_s=2.0, gap_s=0.0, settle_s=0.0, gap_jitter_s=0.4)
+        durations.append(time.perf_counter() - t0)
+    assert max(durations) - min(durations) > 0.05, durations
