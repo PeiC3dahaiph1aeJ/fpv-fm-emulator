@@ -217,7 +217,6 @@ def cmd_latency(args) -> int:
 
 def _cmd_latency(args) -> int:
     """The real measurement: RF on -> the detector reports it, N times."""
-    import adi
     from .latency import (format_summary, measure_detection_latency, summarize,
                           write_csv)
     from .logsource import SerialLogSource
@@ -225,9 +224,10 @@ def _cmd_latency(args) -> int:
     freq_list = [float(x) * 1e6 for x in args.freq_list.split(",") if x.strip()]
     freq_hz = freq_list[0] if freq_list else float(args.freq_mhz) * 1e6
 
-    sdr = adi.Pluto(uri=args.uri)
-    sdr.sample_rate = int(fs)
-    sdr.tx_rf_bandwidth = int(min(fs, 40e6))
+    # the same sink the GUI uses — one arming path, with the DMA-playing check
+    sink = make_sink("pluto", TxConfig(
+        fs=fs, freq_hz=freq_hz, gain_db=float(args.gain),
+        uri=args.uri, rf_bw_hz=min(fs, 40e6)))
 
     src = SerialLogSource(args.port, int(args.baud))
     print(t("Detector log: {port}@{baud} | pattern: {pattern}",
@@ -265,7 +265,7 @@ def _cmd_latency(args) -> int:
     try:
         with src:
             trials = measure_detection_latency(
-                sdr, buf, src, args.pattern_re, freq_hz,
+                sink, buf, src, args.pattern_re, freq_hz,
                 tx_gain_db=float(args.gain), trials=int(args.trials),
                 timeout_s=float(args.timeout), gap_s=float(args.gap),
                 offset_s=float(args.offset_ms) / 1e3,
@@ -275,7 +275,7 @@ def _cmd_latency(args) -> int:
                 gap_jitter_s=float(args.gap_jitter),
                 freq_list_hz=freq_list, on_trial=show)
     finally:
-        del sdr
+        sink.close()
 
     ok = [x for x in trials if x.ok]
     conf = [x.confirm_s for x in ok if x.confirm_s is not None]

@@ -60,28 +60,45 @@ def test_summarize_of_nothing_is_empty():
 
 
 # --------------------------- fakes -----------------------------------------
+class FakeCfg:
+    def __init__(self):
+        self.gain_db = 0.0
+        self.freq_hz = 0.0
+
+
 class FakeSdr:
-    """Just enough of adi.Pluto: records what the run did to the radio."""
+    """Stands in for PlutoSink: records what the run did to the radio.
+
+    The measurement drives a Sink (not adi.Pluto) so that it shares the GUI's
+    verified arming path — two arming paths was the bug that made a run detect
+    nothing while the GUI worked on the same frequency.
+    """
 
     def __init__(self):
-        self.tx_lo = 0
-        self.tx_cyclic_buffer = False
+        self.cfg = FakeCfg()
         self.uploads = 0
         self.gains = []
+        self.freqs = []
+        self.stopped = 0
 
     @property
-    def tx_hardwaregain_chan0(self):
-        return self.gains[-1] if self.gains else None
+    def tx_lo(self):
+        return self.freqs[-1] if self.freqs else 0
 
-    @tx_hardwaregain_chan0.setter
-    def tx_hardwaregain_chan0(self, v):
-        self.gains.append(float(v))
+    def set_freq(self, hz):
+        self.freqs.append(float(hz))
+        self.cfg.freq_hz = float(hz)
 
-    def tx(self, _buf):
+    def set_gain(self, db):
+        self.gains.append(float(db))
+        self.cfg.gain_db = float(db)
+
+    def start(self, _buf):
         self.uploads += 1
+        self.gains.append(self.cfg.gain_db)
 
-    def tx_destroy_buffer(self):
-        pass
+    def stop(self):
+        self.stopped += 1
 
 
 class FakeLog(LogSource):

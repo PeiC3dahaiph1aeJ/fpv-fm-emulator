@@ -216,7 +216,7 @@ GAIN_OFF_DB = -89.0
 
 
 def measure_detection_latency(
-    sdr,
+    sink,
     iq_int16: np.ndarray,
     source: LogSource,
     pattern: str,
@@ -292,36 +292,20 @@ def measure_detection_latency(
                 return False
         return False                          # timed out: proceed anyway, note it
 
-    sdr.tx_lo = int(freq_hz)
-    sdr.tx_hardwaregain_chan0 = GAIN_OFF_DB
-    sdr.tx_cyclic_buffer = True
-    # clear a buffer left by an earlier run before arming; skipping this is the
-    # usual reason the transmitter "does not always start"
-    try:
-        sdr.tx_destroy_buffer()
-    except Exception:
-        pass
-    try:
-        sdr.tx(iq_int16)                  # uploaded once, stays armed
-    except OSError as exc:
-        # A run that was killed (rather than stopped) leaves the cyclic buffer
-        # allocated inside the device; every later attempt then fails with EBUSY
-        # ("Open unlocked: -16") and no amount of retrying clears it.
-        raise RuntimeError(
-            t("The Pluto is busy — something else already owns its TX buffer. "
-              "Usually the GUI is still transmitting (press Stop) or another run is "
-              "open. Note that a second process can still WRITE tx_lo and the gain, "
-              "so two owners silently fight over the radio and the measurement is "
-              "meaningless. If nothing is running, a killed run left the buffer "
-              "allocated: unplug the USB, wait ~10 s, plug it back in. ({err})",
-              err=str(exc))
-        ) from exc
+    # Arm through the SINK, not through adi.Pluto directly. There used to be two
+    # arming paths — the GUI's (which verifies that the DMA is really playing and
+    # reopens the context when it is not) and this one (which just trusted tx()).
+    # That is why a measurement run could sit there detecting nothing while the GUI
+    # worked fine on the same frequency: only one of the two paths had the fix.
+    sink.cfg.gain_db = GAIN_OFF_DB         # arm muted, then gate with the gain
+    sink.set_freq(freqs[0])
+    sink.start(iq_int16)                   # verified: raises if TX never starts
     try:
         for i in range(1, trials + 1):
             if stop_flag and stop_flag():
                 break
             # --- silence, so the detector releases the previous target ---------
-            sdr.tx_hardwaregain_chan0 = GAIN_OFF_DB
+            sink.set_gain(GAIN_OFF_DB)
             released = wait_until_released(release_timeout_s)
             time.sleep(gap_s)
             # Jitter the pause over at least one sweep period. Without it a fixed
@@ -334,13 +318,13 @@ def measure_detection_latency(
             # retune while the carrier is muted, then let the LO settle
             freq_hz = freqs[(i - 1) % len(freqs)]
             tx_mhz = freq_hz / 1e6
-            sdr.tx_lo = int(freq_hz)
+            sink.set_freq(freq_hz)
             time.sleep(max(settle_s, 0.25))
 
             source.drain()                # discard anything from the previous trial
 
             t0 = time.perf_counter()
-            sdr.tx_hardwaregain_chan0 = float(tx_gain_db)
+            sink.set_gain(float(tx_gain_db))
             t_armed = time.perf_counter()
 
             deadline = t0 + timeout_s
@@ -382,9 +366,9 @@ def measure_detection_latency(
             if on_trial:
                 on_trial(tr)
     finally:
-        sdr.tx_hardwaregain_chan0 = GAIN_OFF_DB
         try:
-            sdr.tx_destroy_buffer()
+            sink.set_gain(GAIN_OFF_DB)
         except Exception:
             pass
+        sink.stop()
     return out
