@@ -52,6 +52,7 @@ class Trial:
     upload_s: Optional[float] = None       # command -> buffer armed
     post_arm_s: Optional[float] = None     # buffer armed -> event
     freq_mhz: Optional[float] = None
+    gain_db: Optional[float] = None        # power this trial actually used
     reported_mhz: Optional[float] = None   # frequency the detector named
     note: str = ""
     matched_line: str = ""
@@ -233,6 +234,7 @@ def measure_detection_latency(
     release_timeout_s: float = 25.0,
     gap_jitter_s: float = 0.0,
     freq_list_hz: Optional[Sequence[float]] = None,
+    gain_list_db: Optional[Sequence[float]] = None,
     on_trial: Optional[Callable[[Trial], None]] = None,
     stop_flag: Optional[Callable[[], bool]] = None,
 ) -> List[Trial]:
@@ -316,19 +318,27 @@ def measure_detection_latency(
                 time.sleep(random.uniform(0.0, gap_jitter_s))
 
             # retune while the carrier is muted, then let the LO settle
-            freq_hz = freqs[(i - 1) % len(freqs)]
+            idx = (i - 1) % len(freqs)
+            freq_hz = freqs[idx]
             tx_mhz = freq_hz / 1e6
+            # The right power is band dependent: the Pluto's output rises towards
+            # the low end of its range, and too much of it drives the PA into
+            # compression. The detector then locks onto harmonics that carry the
+            # video while the fundamental is too distorted to decode — RF present,
+            # black screen. Measured on this setup: -30 dB suits the 1.2 GHz band.
+            trial_gain = (float(gain_list_db[idx % len(gain_list_db)])
+                          if gain_list_db else float(tx_gain_db))
             sink.set_freq(freq_hz)
             time.sleep(max(settle_s, 0.25))
 
             source.drain()                # discard anything from the previous trial
 
             t0 = time.perf_counter()
-            sink.set_gain(float(tx_gain_db))
+            sink.set_gain(trial_gain)
             t_armed = time.perf_counter()
 
             deadline = t0 + timeout_s
-            tr = Trial(n=i, ok=False, freq_mhz=tx_mhz,
+            tr = Trial(n=i, ok=False, freq_mhz=tx_mhz, gain_db=trial_gain,
                        upload_s=t_armed - t0,
                        note="timeout" if released else "timeout;not-released")
             while True:
@@ -345,7 +355,7 @@ def measure_detection_latency(
                 if not tr.ok:
                     m = rx.search(line.text)
                     if m and freq_ok(m):
-                        tr = Trial(n=i, ok=True, freq_mhz=tx_mhz,
+                        tr = Trial(n=i, ok=True, freq_mhz=tx_mhz, gain_db=trial_gain,
                                    latency_s=(line.t - t0) - offset_s,
                                    upload_s=t_armed - t0,
                                    post_arm_s=line.t - t_armed,

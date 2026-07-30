@@ -28,6 +28,8 @@ _lang = DEFAULT_LANGUAGE
 # Ukrainian catalog: English key -> Ukrainian text.
 # Keys must match the English strings used in the code exactly.
 CATALOG_UK: Dict[str, str] = {
+    "per-carrier power, dB, comma separated, matching --freq-list (overrides --gain)": "потужність на кожну несучу, дБ, через кому, у порядку --freq-list (має пріоритет над --gain)",
+    "power, dB — -30 measured optimal for the 1.2 GHz band": "потужність, дБ — для діапазону 1.2 ГГц виміряно оптимальні -30",
     "cycle across several carriers, MHz, comma separated (overrides --freq-mhz)": "перебирати кілька несучих, МГц, через кому (має пріоритет над --freq-mhz)",
     "random extra pause, 0..N s — must cover one sweep period": "випадкова додаткова пауза, 0..N с — має перекривати період свіпу",
     "line meaning the detector dropped the target; the next trial waits for it instead of guessing with a fixed pause": "рядок, що означає «детектор відпустив ціль»; наступний замір чекає на нього замість фіксованої паузи",

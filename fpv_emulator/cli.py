@@ -222,6 +222,7 @@ def _cmd_latency(args) -> int:
     from .logsource import SerialLogSource
     buf, fs, frame = _latency_signal(args)
     freq_list = [float(x) * 1e6 for x in args.freq_list.split(",") if x.strip()]
+    gain_list = [float(x) for x in args.gain_list.split(",") if x.strip()]
     freq_hz = freq_list[0] if freq_list else float(args.freq_mhz) * 1e6
 
     # the same sink the GUI uses — one arming path, with the DMA-playing check
@@ -241,7 +242,8 @@ def _cmd_latency(args) -> int:
         "pattern_re": args.pattern_re, "confirm_re": args.confirm_re,
         "freq_mhz": freq_hz / 1e6, "sample_rate": fs,
         "video_pattern": args.pattern, "standard": args.standard,
-        "tx_gain_db": args.gain, "offset_ms": args.offset_ms, "gap_s": args.gap,
+        "tx_gain_db": args.gain, "gain_list": args.gain_list,
+        "offset_ms": args.offset_ms, "gap_s": args.gap,
     }
 
     def show(tr):
@@ -273,7 +275,7 @@ def _cmd_latency(args) -> int:
                 freq_tol_mhz=float(args.freq_tol_mhz),
                 release_pattern=(args.release_re or None),
                 gap_jitter_s=float(args.gap_jitter),
-                freq_list_hz=freq_list, on_trial=show)
+                freq_list_hz=freq_list, gain_list_db=gain_list, on_trial=show)
     finally:
         sink.close()
 
@@ -483,13 +485,21 @@ def build_parser() -> argparse.ArgumentParser:
                     help=t("how far the reported frequency may differ from ours"))
     pd.add_argument("--freq-mhz", default="0",
                     help=t("single carrier, MHz (ignored when --freq-list is given)"))
-    pd.add_argument("--gain", default="-10")
+    pd.add_argument("--gain", default="-30",
+                    help=t("power, dB — -30 measured optimal for the 1.2 GHz band"))
     # 5 s: after the carrier goes the detector still holds the target for a while
     # ("SEEK all 1 win LOST -> rescan") — starting a trial before it has released
     # would measure a detector that was already triggered.
     pd.add_argument("--freq-list", default="",
                     help=t("cycle across several carriers, MHz, comma separated "
                            "(overrides --freq-mhz)"))
+    # Too much power drives the PA into compression: the detector then locks onto
+    # harmonics that carry the video while the fundamental is too distorted to
+    # decode. The right level is band dependent — measured here, -30 dB suits the
+    # 1.2 GHz band, where the Pluto's output is stronger than higher up.
+    pd.add_argument("--gain-list", default="",
+                    help=t("per-carrier power, dB, comma separated, matching "
+                           "--freq-list (overrides --gain)"))
     pd.add_argument("--gap", default="5.0",
                     help=t("silence between trials — long enough for the detector to release"))
     # A sweeping detector plus a fixed cycle lands on nearly the same sweep phase
