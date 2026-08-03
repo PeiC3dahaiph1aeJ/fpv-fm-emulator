@@ -31,6 +31,7 @@ class ProbeResult:
     ctx_ok: bool = False                       # the raw IIO context opened
     traceback_text: Optional[str] = None       # full traceback of the first failure
     lib_versions: Dict[str, str] = field(default_factory=dict)
+    can_transmit: Optional[bool] = None        # False when the image is RX-only
 
     def summary(self) -> str:
         if not self.connected:
@@ -62,11 +63,14 @@ class ProbeResult:
             )
         if self.inferred_preset:
             lines.append("  " + t("Likely type: {preset}", preset=self.inferred_preset))
-        lines.append(
-            "  " + t("Direct 5.8 GHz: {answer}",
-                     answer=t("YES") if self.reaches_5g8
-                     else t("NO (a mod / up-converter is required)"))
-        )
+        # Only claim anything about 5.8 GHz when the range test actually ran —
+        # otherwise "NO" is not a measurement, it is an uninitialised default.
+        if self.tx_lo_max_hz is not None:
+            lines.append(
+                "  " + t("Direct 5.8 GHz: {answer}",
+                         answer=t("YES") if self.reaches_5g8
+                         else t("NO (a mod / up-converter is required)"))
+            )
         for m in self.messages:
             lines.append(f"  · {m}")
         return "\n".join(lines)
@@ -94,6 +98,17 @@ def probe(uri: str = "ip:192.168.2.1", do_range_test: bool = True) -> ProbeResul
                 pass
         try:
             res.lib_versions["libiio (device)"] = ".".join(str(x) for x in ctx.version[:2])
+        except Exception:
+            pass
+        # Which IIO devices this image exposes. On alternative firmwares (Tezuka,
+        # PlutoSky) or a custom FPGA image the names differ, and some RX-oriented
+        # images have no transmit DMA at all — worth saying outright rather than
+        # letting it fail later with an unrelated-looking error.
+        try:
+            from .iio_layout import detect_layout
+            layout = detect_layout(ctx)
+            res.messages.extend(layout.describe().splitlines())
+            res.can_transmit = layout.can_transmit
         except Exception:
             pass
     except ImportError:

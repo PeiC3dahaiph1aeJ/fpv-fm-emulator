@@ -28,6 +28,13 @@ _lang = DEFAULT_LANGUAGE
 # Ukrainian catalog: English key -> Ukrainian text.
 # Keys must match the English strings used in the code exactly.
 CATALOG_UK: Dict[str, str] = {
+    "IIO devices: {list}": "IIO-пристрої: {list}",
+    "  control: {name}": "  керування: {name}",
+    "  RX DMA:  {name}": "  RX DMA:    {name}",
+    "  TX DMA:  {name}": "  TX DMA:    {name}",
+    "  -> this image has no transmit path; the emulator cannot use it (an RX-only FPGA image such as maia-hdl does this). A stock Pluto image is required.": "  -> у цьому образі немає тракту передачі; емулятор не зможе його використати (так поводяться приймальні FPGA-образи, як-от maia-hdl). Потрібен стоковий образ Pluto.",
+    "  -> non-standard names; the emulator adapts to them.": "  -> нестандартні імена; емулятор до них пристосується.",
+    "This device has no transmit path — the emulator cannot use it. {details}": "Цей пристрій не має тракту передачі — емулятор не може його використати. {details}",
     "per-carrier power, dB, comma separated, matching --freq-list (overrides --gain)": "потужність на кожну несучу, дБ, через кому, у порядку --freq-list (має пріоритет над --gain)",
     "power, dB — -30 measured optimal for the 1.2 GHz band": "потужність, дБ — для діапазону 1.2 ГГц виміряно оптимальні -30",
     "cycle across several carriers, MHz, comma separated (overrides --freq-mhz)": "перебирати кілька несучих, МГц, через кому (має пріоритет над --freq-mhz)",

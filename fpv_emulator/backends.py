@@ -111,7 +111,27 @@ class PlutoSink(BaseSink):
                   "pip install pyadi-iio pylibiio")
             ) from exc
 
-        sdr = adi.Pluto(uri=self.cfg.uri)
+        # Which devices this board actually has. Alternative firmwares (Tezuka
+        # builds, PlutoSky boards) and custom FPGA images do not have to use the
+        # stock names that pyadi hard-codes; without this, a mismatch surfaces
+        # from inside pyadi as "argument of type 'NoneType' is not iterable".
+        pluto_cls = adi.Pluto
+        try:
+            import iio  # noqa: WPS433
+            from .iio_layout import detect_layout, pluto_class_for
+            layout = detect_layout(iio.Context(self.cfg.uri))
+            if not layout.can_transmit:
+                raise RuntimeError(
+                    t("This device has no transmit path — the emulator cannot use "
+                      "it. {details}", details=layout.describe())
+                )
+            pluto_cls = pluto_class_for(layout)
+        except RuntimeError:
+            raise
+        except Exception:
+            pass          # cannot inspect: fall back to the stock class
+
+        sdr = pluto_cls(uri=self.cfg.uri)
         try:
             sdr.sample_rate = int(self.cfg.fs)
             sdr.tx_lo = int(self.cfg.freq_hz)
