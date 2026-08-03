@@ -10,6 +10,7 @@ import gc
 import os
 import threading
 import time
+import warnings
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional
@@ -145,9 +146,27 @@ class PlutoSink(BaseSink):
             try:
                 setattr(sdr, attr, value)
             except Exception as exc:
+                # The permitted range lives on the phy channel, not on the pyadi
+                # object: sample_rate maps to voltage0's sampling_frequency, and
+                # pyadi exposes no *_available for it at all. Read it directly —
+                # the range is the one piece of information that makes an EINVAL
+                # actionable ("it wants <= 30.72 MSPS" rather than "invalid").
                 avail = ""
-                try:                       # the device usually publishes its range
-                    avail = str(getattr(sdr, attr + "_available", "") or "")
+                _CHAN_ATTR = {
+                    "sample_rate": "sampling_frequency_available",
+                    "tx_rf_bandwidth": "rf_bandwidth_available",
+                    "tx_hardwaregain_chan0": "hardwaregain_available",
+                }
+                try:
+                    chan_attr = _CHAN_ATTR.get(attr)
+                    if chan_attr is not None:
+                        phy = sdr.ctx.find_device("ad9361-phy")
+                        for ch in phy.channels:
+                            if ch.output and ch.id == "voltage0" and chan_attr in ch.attrs:
+                                avail = str(ch.attrs[chan_attr].value)
+                                break
+                    else:
+                        avail = str(getattr(sdr, attr + "_available", "") or "")
                 except Exception:
                     pass
                 raise RuntimeError(
@@ -155,6 +174,36 @@ class PlutoSink(BaseSink):
                       attr=attr, value=value, unit=unit, err=str(exc),
                       avail=(" " + t("It accepts: {range}", range=avail)) if avail else "")
                 ) from exc
+
+        def _allowed_range(chan_attr: str):
+            """(min, max) the device publishes for a phy TX channel attribute."""
+            try:
+                phy = sdr.ctx.find_device("ad9361-phy")
+                for ch in phy.channels:
+                    if ch.output and ch.id == "voltage0" and chan_attr in ch.attrs:
+                        nums = [float(x) for x in
+                                ch.attrs[chan_attr].value.strip("[] ").split()]
+                        if len(nums) >= 3:
+                            return nums[0], nums[2]
+            except Exception:
+                pass
+            return None
+
+        # Boards disagree about the maximum sample rate: the Pluto+ here tops out
+        # at 30.72 MSPS, while a Tezuka build on a Nano refuses 20 MSPS outright.
+        # Clamping to what this board publishes beats failing, but it changes the
+        # signal, so say so rather than doing it quietly.
+        rng = _allowed_range("sampling_frequency_available")
+        if rng and not (rng[0] <= self.cfg.fs <= rng[1]):
+            wanted, self.cfg.fs = self.cfg.fs, min(max(self.cfg.fs, rng[0]), rng[1])
+            warnings.warn(
+                t("This board does not accept {wanted} MSPS (it allows "
+                  "{min}–{max}); using {used} MSPS instead. The frame length and "
+                  "occupied bandwidth change with it.",
+                  wanted=f"{wanted/1e6:.2f}", min=f"{rng[0]/1e6:.2f}",
+                  max=f"{rng[1]/1e6:.2f}", used=f"{self.cfg.fs/1e6:.2f}"),
+                stacklevel=2,
+            )
 
         try:
             _set("sample_rate", int(self.cfg.fs), " Hz")

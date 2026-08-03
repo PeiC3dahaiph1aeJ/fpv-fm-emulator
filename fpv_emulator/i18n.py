@@ -28,6 +28,7 @@ _lang = DEFAULT_LANGUAGE
 # Ukrainian catalog: English key -> Ukrainian text.
 # Keys must match the English strings used in the code exactly.
 CATALOG_UK: Dict[str, str] = {
+    "This board does not accept {wanted} MSPS (it allows {min}–{max}); using {used} MSPS instead. The frame length and occupied bandwidth change with it.": "Ця плата не приймає {wanted} MSPS (дозволено {min}–{max}); використовую {used} MSPS. Разом із цим змінюються довжина кадру й зайнята смуга.",
     "The device rejected {attr} = {value}{unit} ({err}).{avail}": "Пристрій відхилив {attr} = {value}{unit} ({err}).{avail}",
     "It accepts: {range}": "Він приймає: {range}",
     "IIO devices: {list}": "IIO-пристрої: {list}",
