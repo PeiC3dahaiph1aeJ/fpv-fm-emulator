@@ -28,6 +28,8 @@ _lang = DEFAULT_LANGUAGE
 # Ukrainian catalog: English key -> Ukrainian text.
 # Keys must match the English strings used in the code exactly.
 CATALOG_UK: Dict[str, str] = {
+    "The device rejected {attr} = {value}{unit} ({err}).{avail}": "Пристрій відхилив {attr} = {value}{unit} ({err}).{avail}",
+    "It accepts: {range}": "Він приймає: {range}",
     "IIO devices: {list}": "IIO-пристрої: {list}",
     "  control: {name}": "  керування: {name}",
     "  RX DMA:  {name}": "  RX DMA:    {name}",

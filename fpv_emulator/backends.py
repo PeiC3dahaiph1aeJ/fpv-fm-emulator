@@ -132,12 +132,36 @@ class PlutoSink(BaseSink):
             pass          # cannot inspect: fall back to the stock class
 
         sdr = pluto_cls(uri=self.cfg.uri)
+
+        def _set(attr: str, value, unit: str = ""):
+            """Apply one setting, naming it if the device rejects it.
+
+            These writes went one after another inside a single try, so a device
+            that refused any of them produced a bare '[Errno 22] Invalid
+            argument' — true, useless, and identical for four different causes.
+            Boards differ in what they accept (sample rate ceilings, gain and
+            bandwidth ranges), so the value that was refused is the whole story.
+            """
+            try:
+                setattr(sdr, attr, value)
+            except Exception as exc:
+                avail = ""
+                try:                       # the device usually publishes its range
+                    avail = str(getattr(sdr, attr + "_available", "") or "")
+                except Exception:
+                    pass
+                raise RuntimeError(
+                    t("The device rejected {attr} = {value}{unit} ({err}).{avail}",
+                      attr=attr, value=value, unit=unit, err=str(exc),
+                      avail=(" " + t("It accepts: {range}", range=avail)) if avail else "")
+                ) from exc
+
         try:
-            sdr.sample_rate = int(self.cfg.fs)
-            sdr.tx_lo = int(self.cfg.freq_hz)
+            _set("sample_rate", int(self.cfg.fs), " Hz")
+            _set("tx_lo", int(self.cfg.freq_hz), " Hz")
             rf_bw = int(self.cfg.rf_bw_hz or min(self.cfg.fs, 20e6))
-            sdr.tx_rf_bandwidth = rf_bw
-            sdr.tx_hardwaregain_chan0 = float(self.cfg.gain_db)
+            _set("tx_rf_bandwidth", rf_bw, " Hz")
+            _set("tx_hardwaregain_chan0", float(self.cfg.gain_db), " dB")
             sdr.tx_cyclic_buffer = True
             # Changing tx_lo makes the AD9361 recalibrate, and how long that takes
             # depends on the frequency (VCO band selection). Arming the buffer in
