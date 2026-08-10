@@ -28,6 +28,8 @@ _lang = DEFAULT_LANGUAGE
 # Ukrainian catalog: English key -> Ukrainian text.
 # Keys must match the English strings used in the code exactly.
 CATALOG_UK: Dict[str, str] = {
+    "Failed to start the GUI:": "Не вдалося запустити GUI:",
+    "Hint: run setup.bat again or check the dependencies (pip install -r requirements.txt).": "Підказка: запустіть setup.bat ще раз або перевірте залежності (pip install -r requirements.txt).",
     "FPV FM emulator v{version}": "FPV FM-емулятор v{version}",
     "Auto": "Авто",
     "Firmware:": "Прошивка:",

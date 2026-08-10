@@ -192,3 +192,26 @@ def test_saving_writes_nothing_outside_its_own_group(qt_app, settings):
     settings.setValue("language", "uk")
     _window(settings)._save_state()
     assert settings.value("language") == "uk"
+
+
+def test_a_restored_dry_run_still_warns_that_nothing_goes_on_air(qt_app, settings):
+    """The backend is remembered now, so a dry run follows the operator to the next
+    session. Restoring an empty log over the hints that were just appended left them
+    pressing Start on backend=null with a log that reads like a transmission."""
+    w = _window(settings)
+    w.cb_backend.setCurrentText("null")
+    w._save_state()
+
+    again = _window(settings)
+    assert again.cb_backend.currentText() == "null"
+    assert "null" in again.log.toPlainText(), "the dry-run warning was thrown away"
+
+
+def test_a_language_rebuild_still_replaces_the_log_rather_than_doubling_it(qt_app, settings):
+    """The other side of the same line: there the snapshot does carry the log, and
+    the hints are already in it."""
+    w = _window(settings)
+    w.cb_backend.setCurrentText("null")
+    before = w.log.toPlainText().count("null")
+    w._build_ui(w._capture_state())          # what switching language does
+    assert w.log.toPlainText().count("null") == before

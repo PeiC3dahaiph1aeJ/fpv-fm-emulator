@@ -220,10 +220,26 @@ def test_a_hit_on_the_previous_carrier_is_rejected_after_retuning():
     assert trials[0].ok and trials[0].reported_mhz == 1400.0
 
 
-def test_jitter_makes_the_pause_vary():
-    """A fixed cycle would sample one phase of the detector's sweep every time."""
+def test_jitter_makes_the_pause_vary(monkeypatch):
+    """A fixed cycle would sample one phase of the detector's sweep every time.
+
+    The draw is scripted rather than left to chance. Four real draws from
+    U(0, 0.4) land within 0.05 s of each other about once in 140 runs, so the
+    version of this test that timed genuine randomness failed roughly that often
+    — and a suite that cries wolf is one nobody reads.
+    """
+    from fpv_emulator import latency as latency_mod
+
+    draws, asked = [0.0, 0.1, 0.2, 0.4], []
+
+    def fake_uniform(low, high):
+        asked.append((low, high))
+        return draws[len(asked) - 1]
+
+    monkeypatch.setattr(latency_mod.random, "uniform", fake_uniform)
+
     durations = []
-    for _ in range(4):
+    for _ in range(len(draws)):
         sdr = FakeSdr()
         log = FakeLog([(0.0, _video_line(1200))])
         log.arm(sdr)
@@ -232,4 +248,18 @@ def test_jitter_makes_the_pause_vary():
             sdr, np.zeros(8, dtype=np.complex64), log, VIDEO_RE, 1200e6,
             trials=1, timeout_s=2.0, gap_s=0.0, settle_s=0.0, gap_jitter_s=0.4)
         durations.append(time.perf_counter() - t0)
-    assert max(durations) - min(durations) > 0.05, durations
+
+    assert asked == [(0.0, 0.4)] * len(draws), "the jitter is not drawn over 0..gap_jitter_s"
+    assert durations[-1] - durations[0] > 0.25, durations
+
+
+def test_no_jitter_means_no_draw(monkeypatch):
+    """gap_jitter_s = 0 must not consume a draw or add a pause at all."""
+    from fpv_emulator import latency as latency_mod
+
+    def refuse(*_args, **_kwargs):
+        raise AssertionError("jitter was drawn with gap_jitter_s = 0")
+
+    monkeypatch.setattr(latency_mod.random, "uniform", refuse)
+    _, trials = _run([(0.0, L_VIDEO_3240)], gap_jitter_s=0.0)   # _run transmits 3240
+    assert trials[0].ok

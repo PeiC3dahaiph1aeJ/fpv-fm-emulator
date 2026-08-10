@@ -259,6 +259,7 @@ class PlutoSink(BaseSink):
         self._sdr = None
         self._firmware = firmware_mod.Firmware()
         self._warned_mismatch = False
+        self._rate_note: Optional[str] = None
 
     def info(self) -> dict:
         d = super().info()
@@ -354,9 +355,16 @@ class PlutoSink(BaseSink):
                 max=f"{rng[1]/1e6:.2f}"))
 
         try:
+            # Warn when the answer CHANGES, not on every open. _reopen() comes back
+            # through here on each arming retry, and the GUI turns off warning
+            # de-duplication (it has to, or a repeated aliasing warning would be
+            # swallowed), so three identical lines per Start would push the rest of
+            # the log out of view. A note that differs from last time is new
+            # information and still gets through.
             note = apply_sample_rate(sdr, phy_name, self.cfg.fs, self.cfg.firmware)
-            if note:
+            if note and note != self._rate_note:
                 warnings.warn(note, stacklevel=2)
+            self._rate_note = note
             _set("tx_lo", int(self.cfg.freq_hz), " Hz")
             rf_bw = int(self.cfg.rf_bw_hz or min(self.cfg.fs, 20e6))
             _set("tx_rf_bandwidth", rf_bw, " Hz")

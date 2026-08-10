@@ -15,6 +15,39 @@ error dialog, at the top of `probe`, and via `--version`.
 
 ---
 
+## 0.2.1 — 2026-08-10
+
+Found by an adversarial review of 0.2.0: 29 candidate findings, 26 refuted, 3 real.
+
+### Fixed
+- **A restored dry run no longer looks like a transmission.** Because the backend
+  is remembered now, an operator whose last session used `null` reopened the GUI
+  with `null` still selected — and the restore replaced the event log immediately
+  after the "nothing goes on air" warning was written into it. They would press
+  Start and read a log identical to a real run. The log is now only replaced when
+  the snapshot actually carries one, which is the language-rebuild case it was
+  written for.
+- **The Ukrainian startup-failure dialog was half English.** Its title and trailer
+  were translated, the message and the hint were not — because they are passed as
+  arguments to `_show_error()` rather than sitting inside a `t()` call, and the
+  test that guards the catalogue could not see them. It sees wrapper arguments now.
+- The notice that a board refused the FIR filter repeated on every arming retry.
+  It is reported when the answer *changes*, so a board that starts refusing between
+  opens is still announced.
+
+- A test that timed genuine randomness to prove the inter-trial pause is
+  jittered, and failed about once in 140 runs when four draws happened to land
+  close together. The draw is scripted now: a suite that cries wolf is one nobody
+  reads.
+
+### Added
+- Tests covering `PlutoSink` against a fake board: that it identifies the firmware,
+  passes the profile through instead of defaulting to auto, warns once rather than
+  per retry, and refuses an out-of-range rate before writing anything. Four separate
+  mutations of that code used to pass the whole suite.
+
+---
+
 ## 0.2.0 — 2026-08-10
 
 Everything between the first working version and today. There were no releases in

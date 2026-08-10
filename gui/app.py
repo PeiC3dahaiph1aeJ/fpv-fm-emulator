@@ -222,9 +222,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_readouts()
         self._set_running(self.thread is not None)
         self._on_backend_changed(self.cb_backend.currentText())   # initial SDR field state
-        if state is not None:
-            # restore the log last: rebuilding may have appended hints of its own
-            self.log.setPlainText(state.get("log", ""))
+        # Restore the log last, and ONLY when the snapshot carries one. A language
+        # rebuild does: _capture_state() hands back a log that already contains the
+        # hints _on_backend_changed() has just re-appended, so replacing it is right.
+        # A restored launch does not — the state read from settings has no log on
+        # purpose — and the hints on the line above are new. Overwriting them there
+        # threw away "backend = null — nothing goes on air" for an operator who had
+        # last done a dry run and now, with the backend remembered too, would press
+        # Start and see a log that reads exactly like a transmission.
+        if state is not None and "log" in state:
+            self.log.setPlainText(state["log"])
             self.log.moveCursor(QtGui.QTextCursor.End)
 
     # -- left: controls -----------------------------------------------------

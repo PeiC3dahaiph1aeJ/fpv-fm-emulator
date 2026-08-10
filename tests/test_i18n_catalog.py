@@ -33,6 +33,12 @@ _PLACEHOLDER = re.compile(r"\{(\w+)\}")
 #: package itself failed to import, which is exactly when it must still speak.
 _FUNCS = {"t", "_t"}
 
+#: Functions that translate their arguments instead of being handed a t() call.
+#: The literal then sits at the CALL SITE, where a scan for t("...") cannot see it
+#: — and both of run_gui.py's startup-failure strings were in fact untranslated
+#: for exactly that reason, with this test passing.
+_WRAPPERS = {"_show_error": {"args": (0,), "kwargs": ("message", "hint")}}
+
 
 def _keys_in_code():
     """Every t("literal") in the project. A t(variable) cannot be seen statically."""
@@ -44,9 +50,16 @@ def _keys_in_code():
         if path.name == "i18n.py":
             continue
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-                    and node.func.id in _FUNCS and node.args):
-                arg = node.args[0]
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+                continue
+            wanted = []
+            if node.func.id in _FUNCS and node.args:
+                wanted.append(node.args[0])
+            spec = _WRAPPERS.get(node.func.id)
+            if spec:
+                wanted += [node.args[i] for i in spec["args"] if i < len(node.args)]
+                wanted += [kw.value for kw in node.keywords if kw.arg in spec["kwargs"]]
+            for arg in wanted:
                 if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
                     out.add(arg.value)
     return out
@@ -69,6 +82,14 @@ def _keys_in_config():
                 stack.extend(node.values())
             elif isinstance(node, list):
                 stack.extend(node)
+        # bands.yaml is documented as editable and the GUI renders a band as
+        # t(entry.get("name", key)) — an entry added without a name displays its
+        # raw key through t(). Only that one mapping: every other key in these
+        # files is structure, never shown to anyone.
+        if path.name == "bands.yaml":
+            for key, entry in (data.get("bands") or {}).items():
+                if not (isinstance(entry, dict) and entry.get("name")):
+                    out.add(str(key))
     return out
 
 
