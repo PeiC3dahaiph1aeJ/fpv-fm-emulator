@@ -16,7 +16,7 @@ signal:
   standard: PAL50
   pattern: color_bars    # realistic FPV profile — what the detector actually recognizes
   sample_rate: 30.72e6   # device maximum; fits both carriers plus their sidebands
-  deviation_pp_hz: 6.0e6
+  deviation_pp_hz: 7.0e6
   gain_db: -6
 
 multi_drone:

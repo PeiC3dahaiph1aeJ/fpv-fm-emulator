@@ -3,8 +3,12 @@ type: sweep
 
 signal:
   standard: NTSC60
-  pattern: multiburst   # maximum HF content -> widest occupied bandwidth
-  sample_rate: 10.0e6
+  # Was multiburst at 10 MSPS, chosen for "maximum HF content". That predates the
+  # bench finding that the detector matches the modulation PROFILE: the colour
+  # subcarrier is what makes it read as FPV video, and 10 MSPS is below the floor
+  # for it, so the sweep radiated something no detector was going to recognise.
+  pattern: color_bars
+  sample_rate: 20.0e6
   deviation_pp_hz: 7.0e6
   gain_db: -8
 

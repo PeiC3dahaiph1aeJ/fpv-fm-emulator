@@ -343,7 +343,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.sp_dev.setRange(0.1, 30.0)
         self.sp_dev.setDecimals(2)
         self.sp_dev.setSuffix(" " + t("MHz pp"))
-        self.sp_dev.setValue(6.0)
+        self.sp_dev.setValue(7.0)
         self.sp_dev.valueChanged.connect(self._update_readouts)
         self.chk_burst = QtWidgets.QCheckBox(t("Color burst"))
         self.cb_std.currentIndexChanged.connect(self._update_readouts)

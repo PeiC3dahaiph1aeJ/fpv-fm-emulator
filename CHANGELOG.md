@@ -15,6 +15,31 @@ error dialog, at the top of `probe`, and via `--version`.
 
 ---
 
+## 0.4.0 — 2026-08-10
+
+### Fixed
+- **The shipped scenarios transmitted a signal no detector was going to recognise.**
+  `static_R1`, `power_ramp_R4` and `sweep_raceband` ran at **8 MSPS** with a
+  monochrome pattern, and `sweep_allbands` at 10 MSPS with `multiburst`. All four
+  date from before the colour work and were never revisited, so on the bench they
+  showed no picture while manual mode was fine. Every scenario now uses the profile
+  that is actually recognised: `color_bars`, at least 20 MSPS, 7 MHz deviation.
+  Measured: one carrier is 11.9 MHz wide at −30 dB, and at 30.72 MSPS the two-drone
+  case still folds only 0.49 % past 0.45·fs with the carriers 66 dB apart.
+
+### Changed
+- The default deviation is 7 MHz, in the GUI and for a scenario that omits it. It
+  was 6.
+
+### Added
+- A scenario below 20 MSPS now warns and says why — the colour subcarrier aliases
+  and the occupied bandwidth is too narrow, so the carrier reads as strong and is
+  not recognised as video. A narrow signal is not an error, which is exactly why
+  nothing said anything for months. A test also asserts that nothing we ship trips
+  the guard.
+
+---
+
 ## 0.3.1 — 2026-08-10
 
 ### Added

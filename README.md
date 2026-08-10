@@ -18,7 +18,7 @@ with scenarios (band sweep, power ramp, several "drones" at once) or manually.
 
 ## Download (no git, no terminal)
 
-1. **[⬇ Download ZIP — v0.3.1](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/tags/v0.3.1.zip)** — the tagged
+1. **[⬇ Download ZIP — v0.4.0](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/tags/v0.4.0.zip)** — the tagged
    version this README describes, and the one to quote if something misbehaves.
    ([all versions](https://github.com/Zapadenec1982/fpv-fm-emulator/tags) · [the moving tip of `main`](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/heads/main.zip),
    which changes between releases.)
@@ -79,7 +79,7 @@ config/
   scenarios/*.yaml example scenarios
 scripts/probe_pluto.py   standalone hardware probe
 CHANGELOG.md      what changed in each version
-tests/            offline core tests (pytest, 168 of them)
+tests/            offline core tests (pytest, 171 of them)
 ```
 
 ---
@@ -314,7 +314,7 @@ the changelog's newest entry disagree, so they cannot drift apart.
 ```bash
 python -m pytest tests/ -q
 ```
-168 offline tests, no hardware required. They cover: band/channel lookup (including
+171 offline tests, no hardware required. They cover: band/channel lookup (including
 ambiguous bare names), the HW-range guard, composite video timing and levels, the
 color path (subcarrier, burst placement, PAL V-phase alternation), FM invariants and
 the continuity of the cyclic-buffer seam, multi-drone summation and its carrier

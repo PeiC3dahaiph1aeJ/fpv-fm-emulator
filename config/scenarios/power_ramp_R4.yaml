@@ -3,9 +3,12 @@ type: power_ramp
 
 signal:
   standard: PAL50
-  pattern: bars
-  sample_rate: 8.0e6
-  deviation_pp_hz: 6.0e6
+  # The profile the detector actually recognises: colour bars with a 4.43 MHz
+  # subcarrier and wide FM. It matches on the modulation, not on RSSI — a narrow
+  # black-and-white signal reads as strong and is not recognised.
+  pattern: color_bars
+  sample_rate: 20.0e6    # 20 MSPS is the floor for this profile
+  deviation_pp_hz: 7.0e6
   # gain is set by the power_ramp block below
 
 power_ramp:

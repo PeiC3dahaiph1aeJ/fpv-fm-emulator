@@ -8,7 +8,7 @@ signal:
   standard: PAL50
   pattern: color_bars      # color = 4.43 MHz subcarrier -> "FPV-like" spectrum
   sample_rate: 20.0e6
-  deviation_pp_hz: 6.0e6   # ~17 MHz of occupied bandwidth
+  deviation_pp_hz: 7.0e6   # ~17 MHz of occupied bandwidth
   gain_db: 0
 
 sweep:

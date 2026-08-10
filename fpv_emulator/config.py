@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import warnings
 from typing import Any, Dict, Mapping
 
 import yaml
@@ -111,6 +112,12 @@ def _validate_power_ramp(cfg: Mapping[str, Any]) -> None:
     _require_positive(cfg, "duration_s", 10.0)
 
 
+#: Below this the realistic FPV profile does not fit — the 4.43 MHz colour
+#: subcarrier needs fs >= 2.2x it, and the FM skirts need room beyond that.
+#: Verified on the bench: 20 MSPS with 7 MHz deviation is what gets recognised.
+_MIN_USABLE_FS_HZ = 20e6
+
+
 def validate_scenario(data: Dict[str, Any]) -> None:
     stype = str(data.get("type", "")).lower()
     if stype not in _VALID_TYPES:
@@ -135,7 +142,21 @@ def validate_scenario(data: Dict[str, Any]) -> None:
             raise ValueError(t("Block 'signal:' must be a mapping"))
         _require_gain(signal, "gain_db", -10.0)
         _require_positive(signal, "sample_rate", 20e6)
-        _require_positive(signal, "deviation_pp_hz", 6e6)
+        _require_positive(signal, "deviation_pp_hz", 7e6)
+        # Three of the shipped scenarios sat at 8-10 MSPS for months, left over from
+        # before the colour work, and radiated a signal no detector was going to
+        # recognise — strong on a spectrum analyser, invisible as FPV video. Nothing
+        # said so, because a narrow signal is not an error. Say so now.
+        fs = float(signal.get("sample_rate", 20e6) or 20e6)
+        if fs < _MIN_USABLE_FS_HZ:
+            warnings.warn(
+                t("This scenario uses {fs} MSPS. The profile the detector recognises "
+                  "needs at least {min} MSPS: below that the colour subcarrier "
+                  "aliases and the occupied bandwidth is too narrow, so the carrier "
+                  "reads as strong and is not recognised as video.",
+                  fs=f"{fs / 1e6:.2f}", min=f"{_MIN_USABLE_FS_HZ / 1e6:.0f}"),
+                stacklevel=2,
+            )
 
     if stype == "sweep":
         _validate_sweep(block)

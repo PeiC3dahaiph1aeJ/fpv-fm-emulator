@@ -253,3 +253,40 @@ def test_scenario_with_no_resolvable_channels_fails_loudly():
     with pytest.raises(ValueError):
         runner.run(scenario, threading.Event())
     assert "start" not in [c[0] for c in sink.calls], "the sink was started anyway"
+
+
+# --------------------------- the sample-rate floor -------------------------
+def test_a_scenario_below_the_usable_sample_rate_warns():
+    """Three shipped scenarios sat at 8-10 MSPS for months and radiated something
+    no detector was going to recognise. A narrow signal is not an error, so nothing
+    said so."""
+    import warnings as _w
+    from fpv_emulator.config import validate_scenario
+    scenario = {"type": "static", "static": {"freq_mhz": 1200, "hold_s": 1},
+                "signal": {"sample_rate": 8.0e6, "deviation_pp_hz": 7.0e6}}
+    with _w.catch_warnings(record=True) as caught:
+        _w.simplefilter("always")
+        validate_scenario(scenario)
+    assert any("20" in str(x.message) for x in caught), [str(x.message) for x in caught]
+
+
+def test_a_scenario_at_the_working_rate_is_silent():
+    import warnings as _w
+    from fpv_emulator.config import validate_scenario
+    scenario = {"type": "static", "static": {"freq_mhz": 1200, "hold_s": 1},
+                "signal": {"sample_rate": 20.0e6, "deviation_pp_hz": 7.0e6}}
+    with _w.catch_warnings(record=True) as caught:
+        _w.simplefilter("always")
+        validate_scenario(scenario)
+    assert not caught, [str(x.message) for x in caught]
+
+
+def test_every_shipped_scenario_clears_the_floor():
+    """The guard is worth nothing if what we ship trips it."""
+    import warnings as _w
+    from fpv_emulator.config import list_scenarios, load_scenario
+    for name in list_scenarios():
+        with _w.catch_warnings(record=True) as caught:
+            _w.simplefilter("always")
+            load_scenario(name)
+        assert not caught, f"{name}: {[str(x.message) for x in caught]}"

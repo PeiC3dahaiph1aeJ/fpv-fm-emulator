@@ -40,7 +40,7 @@ class SignalParams:
     standard: str = "PAL50"
     pattern: str = "color_bars"     # realistic FPV profile by default
     sample_rate: float = 20e6       # fits the 4.43 MHz subcarrier + a wide deviation
-    deviation_pp_hz: float = 6e6
+    deviation_pp_hz: float = 7e6
     gain_db: float = -10.0
     color_burst: bool = False
 
@@ -52,7 +52,7 @@ class SignalParams:
             standard=str(d.get("standard", "PAL50")),
             pattern=str(d.get("pattern", "color_bars")),
             sample_rate=float(d.get("sample_rate", 20e6)),
-            deviation_pp_hz=float(d.get("deviation_pp_hz", 6e6)),
+            deviation_pp_hz=float(d.get("deviation_pp_hz", 7e6)),
             # tx_hardwaregain accepts -89..0 only — never hand libiio errno 22
             gain_db=clamp_gain(-10.0 if gain is None else gain),
             color_burst=bool(d.get("color_burst", False)),
