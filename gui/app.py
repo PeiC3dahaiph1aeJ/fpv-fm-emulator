@@ -122,6 +122,25 @@ class PatternPreview(QtWidgets.QLabel):
 # ---------------------------------------------------------------------------
 #  Main window
 # ---------------------------------------------------------------------------
+def _as_bool(value) -> bool:
+    """QSettings returns "false" as a string, and bool("false") is True."""
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+
+#: what each persisted field must be turned back into when it is read.
+#: The language is NOT here: it is kept as a top-level key because run_gui.py
+#: reads it before this module is importable, to translate a startup failure.
+_STATE_TYPES = {
+    "backend": str, "uri": str, "device": str, "file": str,
+    "band": str, "channel": str, "firmware": str, "hw": str,
+    "standard": str, "pattern": str, "mode": str,
+    "freq": float, "fs": float, "dev": float,
+    "gain": int, "burst": _as_bool,
+}
+
+
 class MainWindow(QtWidgets.QMainWindow):
     # generator warnings are raised on the worker thread — queued into the log
     warning_logged = QtCore.Signal(str)
@@ -129,10 +148,10 @@ class MainWindow(QtWidgets.QMainWindow):
     # closeEvent grace period: 30 * (100 ms wait + 200 ms timer) ~ 9 s after the first 2 s
     _CLOSE_MAX_ATTEMPTS = 30
 
-    def __init__(self):
+    def __init__(self, settings: QtCore.QSettings | None = None):
         super().__init__()
         # language must be active BEFORE any widget is created
-        self.settings = QtCore.QSettings("fpv-fm-emulator", "gui")
+        self.settings = settings or QtCore.QSettings("fpv-fm-emulator", "gui")
         saved = str(self.settings.value("language", "") or "")
         set_language(saved if saved in LANGUAGES else detect_language())
 
@@ -142,7 +161,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._close_attempts = 0
         self._prev_showwarning = None
 
-        self._build_ui()
+        self._build_ui(self._restore_state())
         # run_gui.bat starts pythonw — stderr is discarded, so warnings.warn() from the
         # generator would never reach the operator. Route them into the event log.
         self.warning_logged.connect(self._log, QtCore.Qt.QueuedConnection)
@@ -223,9 +242,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.cb_fw = QtWidgets.QComboBox()
         for key in PROFILE_KEYS:
             self.cb_fw.addItem(profile_label(key), key)
-        i_fw = self.cb_fw.findData(
-            str(self.settings.value("firmware_profile", AUTO) or AUTO))
-        self.cb_fw.setCurrentIndex(i_fw if i_fw >= 0 else 0)
+        self.cb_fw.setCurrentIndex(0)      # Auto; _restore_state may move it
         self.cb_fw.setToolTip(
             t("Auto tries the filtered path first and falls back if the board "
               "refuses it — right for both boards here. Pick a firmware only to "
@@ -376,8 +393,10 @@ class MainWindow(QtWidgets.QMainWindow):
             "uri": self.ed_uri.text(),
             "device": self.ed_device.text(),
             "file": self.ed_file.text(),
-            "band_index": self.cb_band.currentIndex(),
-            "channel": self.cb_channel.currentData(),
+            # keys, not indices: an index means a different band once bands.yaml
+            # gains an entry, and this snapshot now outlives the session
+            "band": self.cb_band.currentData() or "",
+            "channel": self.cb_channel.currentData() or "",
             "freq": self.sp_freq.value(),
             "firmware": self.cb_fw.currentData(),
             "hw": self.cb_hw.currentText(),
@@ -387,9 +406,44 @@ class MainWindow(QtWidgets.QMainWindow):
             "dev": self.sp_dev.value(),
             "burst": self.chk_burst.isChecked(),
             "gain": self.sl_gain.value(),
-            "mode_index": self.cb_mode.currentIndex(),
+            "mode": self.cb_mode.currentData() or "",
             "log": self.log.toPlainText(),
         }
+
+    def _save_state(self) -> None:
+        """Persist the window's settings so the next launch starts where this one left off."""
+        state = self._capture_state()
+        # The log is captured for the in-session rebuild only. Persisting it would
+        # grow without bound in the registry, and a log from yesterday restored
+        # into a fresh window reads as if it belonged to this session.
+        state.pop("log", None)
+        self.settings.beginGroup("state")
+        for key, value in state.items():
+            self.settings.setValue(key, "" if value is None else value)
+        self.settings.endGroup()
+        self.settings.sync()
+
+    def _restore_state(self) -> dict | None:
+        """Read back what :meth:`_save_state` wrote, or None on a first launch.
+
+        Every value is cast on the way in. QSettings hands most things back as
+        text on Windows, and bool("false") is True — a checkbox restored without
+        this would be stuck on. A value that no longer fits (a pattern that was
+        renamed, a band that was removed) is dropped rather than applied: the
+        widget keeps its default, which is always a valid one.
+        """
+        self.settings.beginGroup("state")
+        present = set(self.settings.childKeys())
+        out: dict = {}
+        for key, cast in _STATE_TYPES.items():
+            if key not in present:
+                continue
+            try:
+                out[key] = cast(self.settings.value(key))
+            except (TypeError, ValueError):
+                pass
+        self.settings.endGroup()
+        return out or None
 
     def _apply_state(self, state: dict):
         """Restore a snapshot taken by :meth:`_capture_state` without firing handlers."""
@@ -413,14 +467,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ed_device.setText(state.get("device", ""))
         self.ed_file.setText(state.get("file", ""))
 
-        band_index = int(state.get("band_index", 0) or 0)
-        if 0 <= band_index < self.cb_band.count():
+        # "" is the «— all —» row, whose userData is None
+        i_band = self.cb_band.findData(state.get("band") or None)
+        if i_band >= 0:
             self.cb_band.blockSignals(True)
-            self.cb_band.setCurrentIndex(band_index)
+            self.cb_band.setCurrentIndex(i_band)
             self.cb_band.blockSignals(False)
-            self._refresh_channels()
+        self._refresh_channels()
         chan = state.get("channel")
-        if chan is not None:
+        if chan:
             i = self.cb_channel.findData(chan)
             if i >= 0:
                 self.cb_channel.blockSignals(True)
@@ -443,15 +498,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.sl_gain.blockSignals(False)
         self.lbl_gain.setText(t("{v} dB", v=gain))
 
-        mode_index = int(state.get("mode_index", 0) or 0)
-        if 0 <= mode_index < self.cb_mode.count():
-            self.cb_mode.setCurrentIndex(mode_index)
+        i_mode = self.cb_mode.findData(state.get("mode") or None)
+        if i_mode >= 0:
+            self.cb_mode.setCurrentIndex(i_mode)
 
         self.preview.show_pattern(self.cb_pattern.currentText())
 
     def _on_firmware_changed(self, index: int):
         key = self.cb_fw.itemData(index) or AUTO
-        self.settings.setValue("firmware_profile", key)
         if key != AUTO:
             self._log(t("[info] firmware profile forced to «{name}» — it stays set "
                         "for the next launch too. Auto is right for both boards.",
@@ -789,6 +843,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.worker.error.connect(lambda m: self._log(t("[ERROR] {msg}", msg=m)))
         self.worker.finished.connect(self._on_finished)
         self.thread.start()
+        # Also save here, not only on close: a run that is killed, or that takes
+        # the process down inside libiio, would otherwise lose the configuration
+        # it was started with — which is the one worth keeping.
+        self._save_state()
         self._set_running(True)
         self._log(t("— start: {name} —", name=t(scenario.get("name", ""))))
 
@@ -852,6 +910,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._sync_burst()
 
     def closeEvent(self, ev: QtGui.QCloseEvent):
+        # Once, on the way in: a close that has to wait for the device comes back
+        # through here up to _CLOSE_MAX_ATTEMPTS times, and by then _on_stop() has
+        # already run.
+        if self._close_attempts == 0:
+            self._save_state()
         if self.thread is None:
             self._remove_warning_hook()
             ev.accept()

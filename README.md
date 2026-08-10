@@ -76,7 +76,7 @@ config/
   bands.yaml      channel frequencies (editable)
   scenarios/*.yaml example scenarios
 scripts/probe_pluto.py   standalone hardware probe
-tests/            offline core tests (pytest, 121 of them)
+tests/            offline core tests (pytest, 135 of them)
 ```
 
 ---
@@ -104,7 +104,15 @@ It opens right away with a working profile (color_bars, 20 MSPS, PAL50, backend
 - **Power:** slider, **changes at runtime** while transmitting.
 - **Mode:** manual carrier or a ready-made scenario; Start/Stop; event log.
 - **Language:** a selector in the **Output** panel switches the interface between
-  English and Ukrainian; the choice is remembered between sessions.
+  English and Ukrainian.
+
+**The window reopens where you left it.** Every setting — backend, URI, band and
+channel, carrier, standard, pattern, sample rate, deviation, power, firmware profile,
+mode and language — is saved when you close the window and when you press Start, and
+restored on the next launch. The event log is not kept: yesterday's log in a fresh
+window reads as if it belonged to this session. A saved value that no longer exists
+(a renamed pattern, a band removed from `bands.yaml`) is quietly dropped and the
+widget keeps its default.
 
 To transmit: choose backend `pluto` (or `soapy`), a frequency → **Start**.
 
@@ -289,7 +297,7 @@ For installing SoapySDR see `requirements-hw.txt` (pip does not install it).
 ```bash
 python -m pytest tests/ -q
 ```
-121 offline tests, no hardware required. They cover: band/channel lookup (including
+135 offline tests, no hardware required. They cover: band/channel lookup (including
 ambiguous bare names), the HW-range guard, composite video timing and levels, the
 color path (subcarrier, burst placement, PAL V-phase alternation), FM invariants and
 the continuity of the cyclic-buffer seam, multi-drone summation and its carrier
@@ -297,7 +305,9 @@ spacing, the aliasing warnings, scenario-engine runs against a recording sink
 (sweep, the RF-off pause, tune-before-start ordering, power ramp, live power),
 IIO-layout detection on boards that rename their devices, the sample-rate path under
 each firmware profile, that `--firmware` actually reaches every device open, and that
-the Ukrainian catalog covers every string the code and the shipped YAML display.
+the Ukrainian catalog covers every string the code and the shipped YAML display, and
+that the saved window state survives a restart (including the values that a naive
+restore gets wrong: a "false" checkbox, a band stored by position, a stale pattern).
 
 ---
 
