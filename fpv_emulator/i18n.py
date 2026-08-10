@@ -28,7 +28,8 @@ _lang = DEFAULT_LANGUAGE
 # Ukrainian catalog: English key -> Ukrainian text.
 # Keys must match the English strings used in the code exactly.
 CATALOG_UK: Dict[str, str] = {
-    "This board does not accept {wanted} MSPS (it allows {min}–{max}); using {used} MSPS instead. The frame length and occupied bandwidth change with it.": "Ця плата не приймає {wanted} MSPS (дозволено {min}–{max}); використовую {used} MSPS. Разом із цим змінюються довжина кадру й зайнята смуга.",
+    "This board does not accept {wanted} MSPS — it allows {min}–{max}. Set the sample rate within that range (in the GUI: 'Sample rate'). It is not adjusted for you: the video timing is generated for the rate you asked for, so substituting another one here would transmit a picture the detector no longer recognises.": "Ця плата не приймає {wanted} MSPS — вона дозволяє {min}–{max}. Задайте частоту дискретизації в цих межах (у GUI: «Частота дискретизації»). Автоматично її не змінюємо: відеотайминг згенеровано саме під запитану частоту, тож підміна тут вивела б у ефір картинку, яку детектор уже не розпізнає.",
+    "This board refused the interpolating FIR filter that comes with the sample rate; {rate} MSPS was set with the filter off. Image rejection either side of the passband is a little weaker — the video itself is unchanged.": "Ця плата не прийняла інтерполяційний FIR-фільтр, який іде разом із частотою дискретизації; {rate} MSPS встановлено з вимкненим фільтром. Придушення дзеркал обабіч смуги трохи гірше — саме відео не змінюється.",
     "The device rejected {attr} = {value}{unit} ({err}).{avail}": "Пристрій відхилив {attr} = {value}{unit} ({err}).{avail}",
     "It accepts: {range}": "Він приймає: {range}",
     "IIO devices: {list}": "IIO-пристрої: {list}",

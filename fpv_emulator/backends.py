@@ -94,6 +94,44 @@ class BaseSink(ABC):
 # ---------------------------------------------------------------------------
 #  Pluto backend (pyadi-iio)
 # ---------------------------------------------------------------------------
+def set_sample_rate_without_fir(sdr, phy_name: str, rate: float) -> Optional[float]:
+    """Write ``sampling_frequency`` directly, with the FIR filter switched off.
+
+    Setting ``sdr.sample_rate`` does more than set a rate. pyadi's setter is
+    ad9361_set_bb_rate() from libad9361: at or below 20 MSPS it loads a 128-tap
+    FIR interpolating by 4 and switches it on, between 20 and 40 it loads a
+    different one interpolating by 2, and so on. A Tezuka build on a Nano
+    PlutoSDR refuses that with EINVAL at 20 MSPS while the same board advertises
+    2.083–61.44 MSPS as available — which is exactly the range an AD9361 has with
+    the FIR *off*. The rate is fine; the filter is what it will not take.
+
+    So this is the fallback path: drop the filter and set the rate alone. The FIR
+    is an anti-image filter ahead of the half-band chain — losing it costs some
+    rejection of the images either side of the passband, and changes nothing
+    about the video we generate.
+
+    Returns the rate the board reports back, or None if it could not be written.
+    """
+    try:
+        phy = sdr.ctx.find_device(phy_name)
+        for ch in phy.channels:
+            if ch.id == "out" and "voltage_filter_fir_en" in ch.attrs:
+                ch.attrs["voltage_filter_fir_en"].value = "0"
+        # RX and TX share one clock on the AD9361, so voltage0 in is the rate.
+        for ch in phy.channels:
+            if not ch.output and ch.id == "voltage0" and "sampling_frequency" in ch.attrs:
+                ch.attrs["sampling_frequency"].value = str(int(rate))
+                got = float(ch.attrs["sampling_frequency"].value)
+                # The board quantises the rate; a small step is normal, but a
+                # write that silently landed somewhere else is not usable — the
+                # buffer was generated for `rate` and the line timing scales with
+                # it, so a wrong rate means a signal the detector cannot match.
+                return got if abs(got - rate) <= 0.005 * rate else None
+    except Exception:
+        pass
+    return None
+
+
 class PlutoSink(BaseSink):
     """Transmit through an ADALM-Pluto / Pluto+ (pyadi-iio)."""
 
@@ -117,10 +155,12 @@ class PlutoSink(BaseSink):
         # stock names that pyadi hard-codes; without this, a mismatch surfaces
         # from inside pyadi as "argument of type 'NoneType' is not iterable".
         pluto_cls = adi.Pluto
+        phy_name = "ad9361-phy"
         try:
             import iio  # noqa: WPS433
             from .iio_layout import detect_layout, pluto_class_for
             layout = detect_layout(iio.Context(self.cfg.uri))
+            phy_name = layout.phy or phy_name
             if not layout.can_transmit:
                 raise RuntimeError(
                     t("This device has no transmit path — the emulator cannot use "
@@ -160,7 +200,7 @@ class PlutoSink(BaseSink):
                 try:
                     chan_attr = _CHAN_ATTR.get(attr)
                     if chan_attr is not None:
-                        phy = sdr.ctx.find_device("ad9361-phy")
+                        phy = sdr.ctx.find_device(phy_name)
                         for ch in phy.channels:
                             if ch.output and ch.id == "voltage0" and chan_attr in ch.attrs:
                                 avail = str(ch.attrs[chan_attr].value)
@@ -178,7 +218,7 @@ class PlutoSink(BaseSink):
         def _allowed_range(chan_attr: str):
             """(min, max) the device publishes for a phy TX channel attribute."""
             try:
-                phy = sdr.ctx.find_device("ad9361-phy")
+                phy = sdr.ctx.find_device(phy_name)
                 for ch in phy.channels:
                     if ch.output and ch.id == "voltage0" and chan_attr in ch.attrs:
                         nums = [float(x) for x in
@@ -189,24 +229,51 @@ class PlutoSink(BaseSink):
                 pass
             return None
 
-        # Boards disagree about the maximum sample rate: the Pluto+ here tops out
-        # at 30.72 MSPS, while a Tezuka build on a Nano refuses 20 MSPS outright.
-        # Clamping to what this board publishes beats failing, but it changes the
-        # signal, so say so rather than doing it quietly.
+        def _set_sample_rate(rate: int) -> None:
+            """Set the data rate, retrying without the FIR filter if need be.
+
+            Boards that take pyadi's filter keep it — only the ones that refuse
+            it fall back, so nothing moves for the Pluto+.
+            """
+            try:
+                sdr.sample_rate = rate
+                return
+            except Exception:
+                pass
+            got = set_sample_rate_without_fir(sdr, phy_name, rate)
+            if got is not None:
+                warnings.warn(
+                    t("This board refused the interpolating FIR filter that comes "
+                      "with the sample rate; {rate} MSPS was set with the filter "
+                      "off. Image rejection either side of the passband is a little "
+                      "weaker — the video itself is unchanged.",
+                      rate=f"{got/1e6:.2f}"),
+                    stacklevel=2,
+                )
+                return
+            _set("sample_rate", rate, " Hz")     # raises, with the full diagnosis
+
+        # Boards disagree about the sample rate: the Pluto+ here reaches 30.72
+        # MSPS, this Nano publishes 2.083–61.44. Refuse an out-of-range rate up
+        # front instead of clamping to fit — the buffer has already been built
+        # for the requested rate, and the 15.625 kHz line rate the detector
+        # matches on scales with it. A quietly substituted rate would transmit a
+        # carrier that looks right on a spectrum analyser and that the detector
+        # cannot recognise, which is the worst failure this tool can have.
         rng = _allowed_range("sampling_frequency_available")
         if rng and not (rng[0] <= self.cfg.fs <= rng[1]):
-            wanted, self.cfg.fs = self.cfg.fs, min(max(self.cfg.fs, rng[0]), rng[1])
-            warnings.warn(
-                t("This board does not accept {wanted} MSPS (it allows "
-                  "{min}–{max}); using {used} MSPS instead. The frame length and "
-                  "occupied bandwidth change with it.",
-                  wanted=f"{wanted/1e6:.2f}", min=f"{rng[0]/1e6:.2f}",
-                  max=f"{rng[1]/1e6:.2f}", used=f"{self.cfg.fs/1e6:.2f}"),
-                stacklevel=2,
-            )
+            del sdr
+            raise RuntimeError(t(
+                "This board does not accept {wanted} MSPS — it allows {min}–{max}. "
+                "Set the sample rate within that range (in the GUI: 'Sample rate'). "
+                "It is not adjusted for you: the video timing is generated for the "
+                "rate you asked for, so substituting another one here would "
+                "transmit a picture the detector no longer recognises.",
+                wanted=f"{self.cfg.fs/1e6:.2f}", min=f"{rng[0]/1e6:.2f}",
+                max=f"{rng[1]/1e6:.2f}"))
 
         try:
-            _set("sample_rate", int(self.cfg.fs), " Hz")
+            _set_sample_rate(int(self.cfg.fs))
             _set("tx_lo", int(self.cfg.freq_hz), " Hz")
             rf_bw = int(self.cfg.rf_bw_hz or min(self.cfg.fs, 20e6))
             _set("tx_rf_bandwidth", rf_bw, " Hz")
