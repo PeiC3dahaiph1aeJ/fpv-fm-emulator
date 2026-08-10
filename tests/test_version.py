@@ -93,3 +93,12 @@ def test_the_launcher_never_raises_looking_for_it(monkeypatch, tmp_path):
 ])
 def test_the_places_that_show_it_import_it(path, needle):
     assert needle in (ROOT / path).read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("path", ["README.md", "README.uk.md"])
+def test_the_readme_offers_this_version_for_download(path):
+    """The download link is the one thing a colleague acts on; a stale tag in it
+    hands them a different program from the one the page describes."""
+    text = (ROOT / path).read_text(encoding="utf-8")
+    tags = set(re.findall(r"refs/tags/v(\d+\.\d+\.\d+)", text))
+    assert tags == {__version__}, f"{path} offers {tags or 'no tag'}, code is {__version__}"

@@ -18,8 +18,10 @@ with scenarios (band sweep, power ramp, several "drones" at once) or manually.
 
 ## Download (no git, no terminal)
 
-1. **[⬇ Download ZIP](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/heads/main.zip)**
-   (or on the repository page: the green **Code** button → **Download ZIP**).
+1. **[⬇ Download ZIP — v0.2.0](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/tags/v0.2.0.zip)** — the tagged
+   version this README describes, and the one to quote if something misbehaves.
+   ([all versions](https://github.com/Zapadenec1982/fpv-fm-emulator/tags) · [the moving tip of `main`](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/heads/main.zip),
+   which changes between releases.)
 2. **Extract** the archive into a convenient folder (e.g. `C:\Projects\fpv-fm-emulator`).
    ⚠️ Extract it properly — running from inside the ZIP will not work.
 3. Then it is two clicks: `setup.bat`, then `run_gui.bat` (see below).

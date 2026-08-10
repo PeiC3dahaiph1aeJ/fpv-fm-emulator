@@ -18,8 +18,10 @@
 
 ## Завантаження (без git і терміналу)
 
-1. **[⬇ Завантажити ZIP](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/heads/main.zip)**
-   (або на сторінці репозиторію: зелена кнопка **Code** → **Download ZIP**).
+1. **[⬇ Завантажити ZIP — v0.2.0](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/tags/v0.2.0.zip)** — версія з
+   тегом, яку описує цей README, і саме її варто назвати, якщо щось піде не так.
+   ([усі версії](https://github.com/Zapadenec1982/fpv-fm-emulator/tags) · [рухома вершина `main`](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/heads/main.zip),
+   яка змінюється між релізами.)
 2. **Розпакувати** архів у зручну папку (напр. `C:\Projects\fpv-fm-emulator`).
    ⚠️ Саме розпакувати — запускати з середини ZIP не можна.
 3. Далі — два кліки: `setup.bat`, потім `run_gui.bat` (див. нижче).
