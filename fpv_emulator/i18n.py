@@ -28,6 +28,7 @@ _lang = DEFAULT_LANGUAGE
 # Ukrainian catalog: English key -> Ukrainian text.
 # Keys must match the English strings used in the code exactly.
 CATALOG_UK: Dict[str, str] = {
+    "This signal needs a {want} MHz transmit filter; the board allows up to {max} MHz, so {used} MHz was applied. The outermost sidebands are attenuated — the video and the line rate are unchanged.": "Цьому сигналу потрібен передавальний фільтр {want} МГц; плата дозволяє щонайбільше {max} МГц, тож застосовано {used} МГц. Крайні бічні смуги приглушені — саме відео й рядкова частота не змінюються.",
     "This scenario uses {fs} MSPS. The profile the detector recognises needs at least {min} MSPS: below that the colour subcarrier aliases and the occupied bandwidth is too narrow, so the carrier reads as strong and is not recognised as video.": "Цей сценарій використовує {fs} MSPS. Профілю, який розпізнає детектор, потрібно щонайменше {min} MSPS: нижче цього кольорова піднесуча аліасить, а зайнята смуга завузька — несуча читається як сильна, але не розпізнається як відео.",
     "Two drones, the far one stronger (diagnostic)": "Два дрони, дальній сильніший (діагностика)",
     "Two drones at the same level (5.8 GHz)": "Два дрони однакового рівня (5.8 ГГц)",

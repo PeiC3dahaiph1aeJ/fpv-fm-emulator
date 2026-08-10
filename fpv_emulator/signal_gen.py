@@ -44,6 +44,45 @@ class FrameSignal:
 # estimate). This is an upper bound; the deviation dominates the occupied bandwidth.
 _VIDEO_BW_HZ = 1.5e6
 
+#: The AD9361's TX analog filter stops here. ADI's driver halves tx_rf_bandwidth
+#: into a baseband bandwidth and clamps that to 20 MHz, so 40 MHz is the widest
+#: value the part accepts — the 56 MHz figure quoted for these chips is the RX
+#: path. Read the board's own rf_bandwidth_available before trusting this.
+MAX_TX_RF_BANDWIDTH_HZ = 40e6
+
+
+def video_bandwidth_hz(patterns, std) -> float:
+    """Video baseband width for one or more patterns sharing a carrier set.
+
+    Chroma widens it as soon as ONE pattern is a colour pattern. Takes the list
+    rather than a name, because a multi-drone run joins the names for display
+    ("color_bars+color_bars100") and that string is not a pattern — asking
+    is_color_pattern() about it quietly answers "no" and understates the width.
+    """
+    if isinstance(patterns, str):
+        patterns = [patterns]
+    if any(is_color_pattern(p) for p in patterns):
+        return std.color_subcarrier_hz + 1.0e6
+    return _VIDEO_BW_HZ
+
+
+def required_rf_bandwidth_hz(deviation_pp_hz: float, video_bw_hz: float,
+                             offsets_hz=(), fs: float = 0.0) -> float:
+    """How wide the TX analog filter has to be for this signal.
+
+    Centred on the LO, so what matters is the FURTHEST carrier, not the span
+    between them: two drones at 0 and +18 MHz span the same 18 MHz as a pair at
+    -9 and +9, and need twice the filter.
+
+    Capped at 0.9*fs, which costs nothing — the aliasing guard already keeps every
+    carrier inside +-0.45*fs — and at what the part can take.
+    """
+    reach = max((abs(o) for o in offsets_hz), default=0.0)
+    need = 2.0 * reach + occupied_bandwidth_hz(deviation_pp_hz, video_bw_hz)
+    if fs:
+        need = min(need, 0.9 * fs)
+    return min(need, MAX_TX_RF_BANDWIDTH_HZ)
+
 #: Minimum spacing between two simultaneous drone carriers. Measured on the
 #: realistic FPV profile (color_bars, deviation 6 MHz, ~11.5 MHz occupied at
 #: -30 dB): the notch between the two peaks is ~36 dB at 18 MHz of spacing and
@@ -220,9 +259,7 @@ def generate_multi_drone_iq(
     check_nyquist(deviation_pp_hz, fs, max_offset_hz=max_offset)
 
     # chroma widens the occupied bandwidth as soon as ONE carrier is a color pattern
-    video_bw = (std.color_subcarrier_hz + 1.0e6
-                if any(is_color_pattern(d.pattern) for d in drones)
-                else _VIDEO_BW_HZ)
+    video_bw = video_bandwidth_hz([d.pattern for d in drones], std)
     bw = occupied_bandwidth_hz(deviation_pp_hz, video_bw)
 
     # Two carriers that sit too close stop being two targets: measured on the

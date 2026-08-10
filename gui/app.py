@@ -21,6 +21,7 @@ from fpv_emulator.bands import load_band_table
 from fpv_emulator.config import list_scenarios, load_scenario
 from fpv_emulator.firmware import AUTO, PROFILE_KEYS, profile_label
 from fpv_emulator.fm import occupied_bandwidth_hz
+from fpv_emulator.signal_gen import required_rf_bandwidth_hz, video_bandwidth_hz
 from fpv_emulator.i18n import LANGUAGES, detect_language, get_language, set_language, t
 from fpv_emulator.scenarios import ScenarioRunner
 from fpv_emulator.video import (
@@ -736,8 +737,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
         n = int(round(std.line_us * 1e-6 * fs)) * std.total_lines
         mb = n * 4 / 1e6  # complex int16 = 4 bytes/sample
-        # color patterns are wider because of the subcarrier — computed as in signal_gen
-        video_bw = (std.color_subcarrier_hz + 1.0e6) if is_color_pattern(pattern) else 1.5e6
+        # alias_patterns, not `pattern`: a multi-drone run joins the names into
+        # "color_bars+color_bars100", which is not a pattern, so asking about it
+        # answered "monochrome" and understated the width by 7.9 MHz — enough to
+        # withhold the too-wide warning below on exactly the colour multi-drone runs.
+        video_bw = video_bandwidth_hz(alias_patterns, std)
         bw = occupied_bandwidth_hz(dev, video_bw)
         max_offset = max((abs(o) for o in offsets), default=0.0)
         if offsets:
@@ -781,11 +785,29 @@ class MainWindow(QtWidgets.QMainWindow):
             }
         return load_scenario(list_scenarios()[mode])
 
-    def _make_sink(self, fs: float):
+    def _rf_bw_for(self, scenario, fs: float) -> float:
+        """The TX analog filter width this run needs.
+
+        It used to be min(fs, 20e6), which has nothing to do with the signal: a
+        two-drone run at +-9 MHz occupies 27.6 MHz and was radiated through a
+        20 MHz filter. Harmless there — the filter is symmetric about the LO, so
+        both carriers lose the same fraction of a dB — but it does not scale, and
+        a wider split would have come back attenuated and been read as "spreading
+        them out does not help".
+        """
+        sig = (scenario or {}).get("signal") or {}
+        dev = float(sig.get("deviation_pp_hz", self.sp_dev.value() * 1e6))
+        std = get_standard(str(sig.get("standard", self.cb_std.currentText())))
+        drones = ((scenario or {}).get("multi_drone") or {}).get("drones") or []
+        offsets = [float(d.get("offset_mhz", 0.0)) * 1e6 for d in drones]
+        pats = [str(d.get("pattern", "")) for d in drones] or                [str(sig.get("pattern", self.cb_pattern.currentText()))]
+        return required_rf_bandwidth_hz(dev, video_bandwidth_hz(pats, std), offsets, fs)
+
+    def _make_sink(self, fs: float, scenario: dict | None = None):
         kind = self.cb_backend.currentText()
         cfg = TxConfig(fs=fs, freq_hz=self.sp_freq.value() * 1e6,
                        gain_db=float(self.sl_gain.value()),
-                       uri=self.ed_uri.text(), rf_bw_hz=min(fs, 20e6),
+                       uri=self.ed_uri.text(), rf_bw_hz=self._rf_bw_for(scenario, fs),
                        device=self.ed_device.text(),
                        firmware=str(self.cb_fw.currentData() or AUTO))
         return make_sink(kind, cfg, file_path=self.ed_file.text())
@@ -864,7 +886,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 scenario = self._build_scenario()
                 fs = float(scenario.get("signal", {}).get(
                     "sample_rate", self.sp_fs.value() * 1e6))
-                sink = self._make_sink(fs)
+                sink = self._make_sink(fs, scenario)
             except Exception as exc:  # noqa: BLE001
                 failure = exc
         for w in caught:

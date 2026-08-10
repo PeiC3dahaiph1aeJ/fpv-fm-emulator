@@ -8,10 +8,11 @@ type: multi_drone
 # the detector sees ONE wide blob instead of two targets; at 18 MHz the notch is
 # ~36 dB (cleanly separated) while only 0.34% of the power folds past Nyquist.
 #
-# Why not wider: this Pluto tops out at 30.72 MSPS (verified on the device — 40,
-# 50 and 61.44 MSPS are rejected with errno 22, and disabling the TX FIR does not
-# lift it), so ~20 MHz of spacing is the hard ceiling and it already folds ~1% of
-# the power. For a wider split use a second SDR (backend=soapy) on its own carrier.
+# Why not wider HERE: the Pluto+ tops out at 30.72 MSPS (verified on it — 40, 50
+# and 61.44 MSPS are rejected with errno 22, and disabling the TX FIR does not lift
+# it), which caps the spacing at ~20 MHz. That is a property of THAT board, not of
+# the tool: the Nano on Tezuka firmware accepts 61.44 MSPS, where ~32 MHz of
+# spacing fits with room to spare. This file stays at 30.72 so it runs on both.
 signal:
   standard: PAL50
   pattern: color_bars    # realistic FPV profile — what the detector actually recognizes

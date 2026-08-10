@@ -30,7 +30,7 @@ from .fm import to_int16_iq
 from .i18n import available_languages, detect_language, set_language, t
 from .probe import probe
 from .scenarios import ScenarioRunner, SignalParams
-from .signal_gen import generate_frame_iq
+from .signal_gen import generate_frame_iq, required_rf_bandwidth_hz, video_bandwidth_hz
 from .video import get_standard, list_all_patterns, list_color_patterns, list_patterns
 
 
@@ -392,8 +392,14 @@ def _cmd_tx(args) -> int:
     sp = SignalParams.from_dict(scenario.get("signal"))
     fs = sp.sample_rate
 
+    drones = (scenario.get("multi_drone") or {}).get("drones") or []
+    offsets = [float(d.get("offset_mhz", 0.0)) * 1e6 for d in drones]
+    pats = [str(d.get("pattern", "")) for d in drones] or [sp.pattern]
+    rf_bw = required_rf_bandwidth_hz(
+        sp.deviation_pp_hz, video_bandwidth_hz(pats, get_standard(sp.standard)),
+        offsets, fs)
     cfg = TxConfig(fs=fs, freq_hz=0.0, gain_db=sp.gain_db, uri=args.uri,
-                   rf_bw_hz=min(fs, 20e6), device=args.device,
+                   rf_bw_hz=rf_bw, device=args.device,
                    firmware=args.firmware)
     sink = make_sink(args.backend, cfg, file_path=args.out)
 

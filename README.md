@@ -18,7 +18,7 @@ with scenarios (band sweep, power ramp, several "drones" at once) or manually.
 
 ## Download (no git, no terminal)
 
-1. **[⬇ Download ZIP — v0.4.0](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/tags/v0.4.0.zip)** — the tagged
+1. **[⬇ Download ZIP — v0.5.0](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/tags/v0.5.0.zip)** — the tagged
    version this README describes, and the one to quote if something misbehaves.
    ([all versions](https://github.com/Zapadenec1982/fpv-fm-emulator/tags) · [the moving tip of `main`](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/heads/main.zip),
    which changes between releases.)
@@ -79,7 +79,7 @@ config/
   scenarios/*.yaml example scenarios
 scripts/probe_pluto.py   standalone hardware probe
 CHANGELOG.md      what changed in each version
-tests/            offline core tests (pytest, 171 of them)
+tests/            offline core tests (pytest, 174 of them)
 ```
 
 ---
@@ -182,10 +182,11 @@ then a block per type. Examples are in `config/scenarios/`.
 two carriers closer than **~14 MHz** merge into a single wide blob and the detector
 reports one target instead of two (the notch between the peaks collapses to ~16 dB).
 The shipped scenario uses **18 MHz** (offsets ±9), where the notch is ~36 dB and only
-0.34 % of the power folds past Nyquist. The ceiling is the board: this Pluto+ tops out
-at **30.72 MSPS** (40 / 50 / 61.44 are rejected with errno 22, and disabling the TX FIR
-does not lift it), which puts the widest usable split at ~20 MHz. For more, use a
-second SDR on its own carrier. Closer offsets raise a warning rather than failing.
+0.34 % of the power folds past Nyquist. The ceiling is the board, not the tool: a Pluto+ tops out at
+**30.72 MSPS** (40 / 50 / 61.44 rejected with errno 22, and disabling the TX FIR does
+not lift it), capping the split at ~20 MHz — while a Nano on Tezuka firmware accepts
+**61.44 MSPS**, where ~32 MHz fits with room to spare. The shipped scenario stays at
+30.72 so it runs on both. Closer offsets raise a warning rather than failing.
 
 Sweep across bands:
 ```yaml
@@ -314,7 +315,7 @@ the changelog's newest entry disagree, so they cannot drift apart.
 ```bash
 python -m pytest tests/ -q
 ```
-171 offline tests, no hardware required. They cover: band/channel lookup (including
+174 offline tests, no hardware required. They cover: band/channel lookup (including
 ambiguous bare names), the HW-range guard, composite video timing and levels, the
 color path (subcarrier, burst placement, PAL V-phase alternation), FM invariants and
 the continuity of the cyclic-buffer seam, multi-drone summation and its carrier

@@ -188,14 +188,18 @@ def rejected_error(attr: str, value, unit: str, err, avail: str = "",
     )
 
 
-def allowed_sample_rates(sdr, phy_name: str) -> Optional[Tuple[float, float]]:
-    """(min, max) sample rate the board publishes, or None if it publishes none."""
+def _parse_range(text: str) -> Optional[Tuple[float, float]]:
+    """(min, max) from an IIO "[min step max]" string, or None if it is not one."""
     try:
-        nums = [float(x) for x in
-                available_text(sdr, phy_name, "sample_rate").strip("[] ").split()]
+        nums = [float(x) for x in text.strip("[] ").split()]
     except ValueError:
         return None
     return (nums[0], nums[2]) if len(nums) >= 3 else None
+
+
+def allowed_sample_rates(sdr, phy_name: str) -> Optional[Tuple[float, float]]:
+    """(min, max) sample rate the board publishes, or None if it publishes none."""
+    return _parse_range(available_text(sdr, phy_name, "sample_rate"))
 
 
 def apply_sample_rate(sdr, phy_name: str, rate: float,
@@ -269,6 +273,7 @@ class PlutoSink(BaseSink):
         self._sdr = None
         self._firmware = firmware_mod.Firmware()
         self._warned_mismatch = False
+        self._rf_bw_hz: Optional[float] = None
         self._rate_note: Optional[str] = None
 
     def info(self) -> dict:
@@ -277,6 +282,8 @@ class PlutoSink(BaseSink):
         # operator debugging a board needs to see that those two can differ.
         d["firmware_profile"] = firmware_mod.profile(self.cfg.firmware).key
         d["firmware"] = self._firmware.describe()
+        # the analog filter width appeared in no log, no readout and no info dict
+        d["rf_bw_hz"] = self._rf_bw_hz
         return d
 
     def _ensure_open(self) -> None:
@@ -376,8 +383,29 @@ class PlutoSink(BaseSink):
                 warnings.warn(note, DeviceDetail, stacklevel=2)
             self._rate_note = note
             _set("tx_lo", int(self.cfg.freq_hz), " Hz")
-            rf_bw = int(self.cfg.rf_bw_hz or min(self.cfg.fs, 20e6))
-            _set("tx_rf_bandwidth", rf_bw, " Hz")
+            # Clamp rather than refuse, unlike the sample rate. Nothing in the
+            # buffer depends on the analog filter: not one sample changes, and the
+            # 15.625 kHz line rate the detector matches on is untouched. A narrow
+            # filter costs a fraction of a dB, symmetrically about the LO — so
+            # refusing would brick a board for a defect that is worth less than
+            # the warning. Say what was asked for and what was applied, because a
+            # silently narrow filter is what this replaced.
+            want = float(self.cfg.rf_bw_hz or min(self.cfg.fs, 20e6))
+            rf_bw = want
+            rng = _parse_range(available_text(sdr, phy_name, "tx_rf_bandwidth"))
+            if rng:
+                rf_bw = min(max(want, rng[0]), rng[1])
+            if abs(rf_bw - want) > 1e3:
+                warnings.warn(
+                    t("This signal needs a {want} MHz transmit filter; the board "
+                      "allows up to {max} MHz, so {used} MHz was applied. The "
+                      "outermost sidebands are attenuated — the video and the line "
+                      "rate are unchanged.",
+                      want=f"{want/1e6:.2f}", max=f"{rng[1]/1e6:.2f}",
+                      used=f"{rf_bw/1e6:.2f}"),
+                    DeviceDetail, stacklevel=2)
+            self._rf_bw_hz = rf_bw
+            _set("tx_rf_bandwidth", int(rf_bw), " Hz")
             _set("tx_hardwaregain_chan0", float(self.cfg.gain_db), " dB")
             sdr.tx_cyclic_buffer = True
             # Changing tx_lo makes the AD9361 recalibrate, and how long that takes

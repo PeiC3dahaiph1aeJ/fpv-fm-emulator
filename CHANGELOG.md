@@ -15,6 +15,49 @@ error dialog, at the top of `probe`, and via `--version`.
 
 ---
 
+## 0.5.0 — 2026-08-10
+
+Found by an adversarial review of the claim that a hard-coded 20 MHz transmit
+filter was merging the two multi-drone carriers. **That claim was wrong** — the
+filter is symmetric about the LO and both carriers sit at the same offset, so it
+attenuates them equally to within 0.05 dB and cannot turn two targets into one.
+The setting was a real defect for a different reason.
+
+### Changed
+- **The transmit filter width now comes from the signal, not from the sample rate.**
+  It was `min(fs, 20e6)` in the GUI and the CLI, while the same codebase wrote
+  `min(fs, 40e6)` on the measurement path — a number nobody in the project believed
+  in. It is now `2 x furthest carrier + occupied bandwidth`, capped at 0.9·fs and at
+  the AD9361's real 40 MHz TX ceiling. The span between carriers is the wrong
+  quantity: two drones at 0 and +18 MHz span the same 18 MHz as a pair at ±9 and
+  need twice the filter.
+  At today's ±9 MHz this is worth a fraction of a dB. It matters for what comes
+  next: with the old cap, widening the split to ±16 MHz at 61.44 MSPS would have
+  come back several dB down and been read as "spreading them out does not help".
+- A filter wider than the board allows is clamped and stated, not refused. Nothing
+  in the buffer depends on it — unlike the sample rate, where a substitution moves
+  the 15.625 kHz line rate the detector matches on.
+
+### Fixed
+- The GUI readout asked `is_color_pattern()` about the joined name
+  `"color_bars+color_bars100"`, which is not a pattern, so it used the monochrome
+  video bandwidth and understated multi-drone occupancy by 7.9 MHz — enough to
+  withhold its own "wider than the sample rate" warning on exactly the colour
+  multi-drone runs.
+- `multi_drone.yaml` and both READMEs still said 30.72 MSPS is the ceiling and that
+  61.44 is rejected. True of the Pluto+, false of the Nano on Tezuka, and precisely
+  the comment that would stop the wider split from being tried.
+- The test fixture published 56 MHz as the TX bandwidth ceiling. That is the RX
+  figure; ADI's driver halves `tx_rf_bandwidth` and clamps the result to 20 MHz, so
+  40 MHz is the widest the part takes. The fixture would have blessed a value a real
+  board refuses.
+
+### Added
+- The applied filter width is in `info()`. It appeared in no log, no readout and no
+  diagnostic before.
+
+---
+
 ## 0.4.0 — 2026-08-10
 
 ### Fixed

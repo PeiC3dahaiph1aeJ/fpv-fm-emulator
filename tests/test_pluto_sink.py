@@ -73,7 +73,8 @@ class Board:
             FakeChan("voltage0", output=False, attrs={"sampling_frequency": FakeAttr(3000000)}),
             FakeChan("voltage0", output=True, attrs={
                 "sampling_frequency_available": FakeAttr(rates),
-                "rf_bandwidth_available": FakeAttr("[200000 1 56000000]"),
+                # 40 MHz, not the 56 MHz often quoted for these chips: that is the RX path.
+        "rf_bandwidth_available": FakeAttr("[200000 1 40000000]"),
                 "hardwaregain_available": FakeAttr("[-89.750000 0.250000 0.000000]"),
             }),
             FakeChan("out", output=False, attrs={"voltage_filter_fir_en": FakeAttr(1)}),
@@ -251,3 +252,28 @@ def test_a_notice_that_changes_still_gets_through(board):
     board.takes_fir = False
     sink._sdr = None
     assert any("refused" in n for n in _open(sink))
+
+
+# --------------------------- the transmit filter ---------------------------
+def test_the_filter_width_comes_from_the_signal_not_the_sample_rate(board):
+    """It was min(fs, 20e6), which has nothing to do with how wide the signal is."""
+    sink = PlutoSink(TxConfig(fs=30.72e6, freq_hz=5769e6, gain_db=-6.0,
+                              rf_bw_hz=27.65e6))
+    _open(sink)
+    assert board.settings["tx_rf_bandwidth"] == 27650000
+    assert sink.info()["rf_bw_hz"] == 27.65e6
+
+
+def test_a_filter_wider_than_the_board_allows_is_clamped_and_said_out_loud(board):
+    """Clamped, not refused: nothing in the buffer depends on the analog filter,
+    unlike the sample rate, where a substitution changes the line rate."""
+    sink = PlutoSink(TxConfig(fs=61.44e6, freq_hz=5769e6, gain_db=-6.0,
+                              rf_bw_hz=52e6))
+    notes = _open(sink)
+    assert board.settings["tx_rf_bandwidth"] == 40000000
+    assert any("40.00" in n and "52.00" in n for n in notes), notes
+
+
+def test_a_filter_the_board_allows_passes_silently(board):
+    sink = PlutoSink(TxConfig(fs=61.44e6, freq_hz=5769e6, gain_db=-6.0, rf_bw_hz=40e6))
+    assert not [n for n in _open(sink) if "transmit filter" in n]
