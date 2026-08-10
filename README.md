@@ -67,6 +67,9 @@ fpv_emulator/
   scenarios.py    scenario engine (static/sweep+pause/power_ramp/multi_drone), live power
   config.py       loading/validation of YAML scenarios
   probe.py        detection of the Pluto chip and its tuning limits
+  iio_layout.py   finds the IIO control/RX/TX devices by shape, not by name
+  firmware.py     firmware profiles (which ways of setting the rate may be tried)
+  i18n.py         English/Ukrainian catalog
   cli.py          command-line interface
 gui/app.py        desktop GUI (PySide6): manual control + scenarios + preview
 config/
@@ -120,7 +123,8 @@ The GUI covers everyday work; the CLI is handy for scripts. Run it through `.ven
 ```
 
 The interface language is selected with the `--lang en|uk` flag (English by default);
-the `FPV_LANG=uk` environment variable works as a fallback default.
+the `FPV_LANG=uk` environment variable works as a fallback default. `--firmware` picks
+the firmware profile (see below).
 
 Manual installation (instead of `setup.bat`):
 ```bash
@@ -143,8 +147,9 @@ removes the vertical roll of the picture on the detector's monitor. The old name
 `multiburst`, `white`, `gray`, `black`.
 
 **Color patterns (realistic FPV):** `color_bars` (75%), `color_bars100` — with a
-4.43 MHz subcarrier (PAL) / 3.58 MHz (NTSC), burst and chroma modulation. They require
-`fs ≥ ~13 MSPS` (in the GUI it is raised automatically to 20).
+4.43 MHz subcarrier (PAL) / 3.58 MHz (NTSC), burst and chroma modulation. Below
+`fs = 2.2 × subcarrier` (~9.8 MSPS for PAL) the subcarrier aliases and the call is
+refused; **13–15 MSPS is the recommendation**, and the GUI opens at 20.
 
 ---
 
@@ -159,6 +164,15 @@ then a block per type. Examples are in `config/scenarios/`.
 | `sweep` | stepping through channels/**bands with a step** (`ranges`), with an optional **pause** (`pause_s`) |
 | `power_ramp` | a drone approaching/departing (start_db→end_db, mode: up/down/pingpong) |
 | `multi_drone` | several carriers at once (drones[{pattern, offset_mhz, level_db}]) |
+
+**Multi-drone spacing.** One realistic FPV carrier occupies ~11.5 MHz at −30 dB, so
+two carriers closer than **~14 MHz** merge into a single wide blob and the detector
+reports one target instead of two (the notch between the peaks collapses to ~16 dB).
+The shipped scenario uses **18 MHz** (offsets ±9), where the notch is ~36 dB and only
+0.34 % of the power folds past Nyquist. The ceiling is the board: this Pluto+ tops out
+at **30.72 MSPS** (40 / 50 / 61.44 are rejected with errno 22, and disabling the TX FIR
+does not lift it), which puts the widest usable split at ~20 MHz. For more, use a
+second SDR on its own carrier. Closer offsets raise a warning rather than failing.
 
 Sweep across bands:
 ```yaml
@@ -227,9 +241,9 @@ sessions, and a forced one is written into the event log on every Start — a st
 override that silently followed a different board to the bench would be worse than
 the bug it works around.
 
-CLI: `--firmware auto|adi|tezuka` on `tx`, `latency` and `bench-tx`. Not on `probe`,
-which never sets a sample rate — the flag would parse and change nothing. `probe`
-instead **reports** the firmware it found.
+CLI: `--firmware auto|adi|tezuka`, on every command that opens the device. Not on
+`probe`, which never sets a sample rate — the flag would parse and change nothing.
+`probe` instead **reports** the firmware it found.
 
 Auto-detection deliberately does not choose the code path. "Tezuka" is a firmware
 *builder* covering some ten different boards, so the version string does not predict
@@ -292,6 +306,13 @@ the Ukrainian catalog covers every string the code and the shipped YAML display.
   realistic wide color signal is recognized, a narrow B/W one is not, despite a high RSSI.
 - A field rate of **50/60 Hz** (not 25/30) is mandatory for correct vertical
   synchronization on the detector's monitor.
+- **More power is not better.** On the 1.2 GHz band **−30 dB** gave the best results
+  here. At −10 dB the PA compresses: harmonics appear that carry the video too, the
+  detector can lock onto one of those instead, and the fundamental shows a black
+  screen while the RF is plainly present on the analyser.
+- **A transmitter that reports success can be silent.** `tx()` returns without error
+  while the DMA never starts. The sink verifies through digital loopback and retries,
+  because everything measured downstream of an unnoticed silent transmitter is wrong.
 
 ---
 
