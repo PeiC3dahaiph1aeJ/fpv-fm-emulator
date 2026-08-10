@@ -18,7 +18,7 @@
 
 ## Завантаження (без git і терміналу)
 
-1. **[⬇ Завантажити ZIP — v0.3.0](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/tags/v0.3.0.zip)** — версія з
+1. **[⬇ Завантажити ZIP — v0.3.1](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/tags/v0.3.1.zip)** — версія з
    тегом, яку описує цей README, і саме її варто назвати, якщо щось піде не так.
    ([усі версії](https://github.com/Zapadenec1982/fpv-fm-emulator/tags) · [рухома вершина `main`](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/heads/main.zip),
    яка змінюється між релізами.)

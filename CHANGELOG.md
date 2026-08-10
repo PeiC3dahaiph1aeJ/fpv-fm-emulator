@@ -15,6 +15,22 @@ error dialog, at the top of `probe`, and via `--version`.
 
 ---
 
+## 0.3.1 — 2026-08-10
+
+### Added
+- Two multi-drone scenarios that make "the detector reported one target" mean
+  something. On its own that result cannot tell "the second carrier is not on air"
+  from "the detector only reports the strongest", and a spectrum analyser is not
+  always at hand.
+  - `multi_drone_swap` — the same pair with the levels mirrored. Run it straight
+    after `multi_drone`: if the reported frequency moves, both carriers are
+    radiating and the question is the detector's, not the signal's.
+  - `multi_drone_equal` — both targets at the same level. `multi_drone` makes the
+    second one 6 dB weaker to stand for a drone further away, which at 5.8 GHz —
+    where the Pluto output is weakest — can put it under the threshold on its own.
+
+---
+
 ## 0.3.0 — 2026-08-10
 
 ### Added

@@ -18,7 +18,7 @@ with scenarios (band sweep, power ramp, several "drones" at once) or manually.
 
 ## Download (no git, no terminal)
 
-1. **[⬇ Download ZIP — v0.3.0](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/tags/v0.3.0.zip)** — the tagged
+1. **[⬇ Download ZIP — v0.3.1](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/tags/v0.3.1.zip)** — the tagged
    version this README describes, and the one to quote if something misbehaves.
    ([all versions](https://github.com/Zapadenec1982/fpv-fm-emulator/tags) · [the moving tip of `main`](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/heads/main.zip),
    which changes between releases.)

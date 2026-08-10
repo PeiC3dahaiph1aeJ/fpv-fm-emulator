@@ -1,0 +1,24 @@
+name: "Two drones at the same level (5.8 GHz)"
+type: multi_drone
+
+# Two targets of equal strength. multi_drone.yaml deliberately makes the second one
+# 6 dB weaker to stand for a drone further away — a good scenario, but a poor first
+# test: at 5.8 GHz the Pluto output is already at its weakest, so a target 6 dB down
+# may simply sit under the detector's threshold, and "one target reported" then says
+# nothing about whether the detector can separate two.
+#
+# Start here, then use multi_drone.yaml to add the range difference back once two
+# equal targets are seen.
+signal:
+  standard: PAL50
+  pattern: color_bars
+  sample_rate: 30.72e6
+  deviation_pp_hz: 6.0e6
+  gain_db: -6
+
+multi_drone:
+  center_channel: R4
+  drones:
+    - { pattern: color_bars,    offset_mhz: -9.0, level_db: 0 }    # ~5760 MHz
+    - { pattern: color_bars100, offset_mhz:  9.0, level_db: 0 }    # ~5778 MHz
+  hold_s: 0

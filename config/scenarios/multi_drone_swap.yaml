@@ -1,0 +1,33 @@
+name: "Two drones, the far one stronger (diagnostic)"
+type: multi_drone
+
+# The mirror image of multi_drone.yaml, and only that: same centre, same spacing,
+# same rate — the levels are swapped, so the FAR carrier (+9 MHz) is the strong one.
+#
+# What it is for. A detector that reports one target when two are transmitted has
+# told you nothing on its own: it cannot distinguish "the second carrier is not on
+# air" from "I only report the strongest". Running this straight after
+# multi_drone.yaml separates them, with no spectrum analyser involved:
+#
+#   the reported frequency MOVES  (5760 -> 5778 MHz)
+#       both carriers are radiating. The detector reports the strongest one, and
+#       the multi-drone signal is doing its job.
+#   the reported frequency STAYS
+#       only one carrier is reaching the detector. Look at the RF chain, not the
+#       generator — offline measurement puts the two peaks 27.7 dB apart with the
+#       levels exactly as configured.
+#
+# Read the detector's own frequency, not ours: 5760 MHz is drone A, 5778 is drone B.
+signal:
+  standard: PAL50
+  pattern: color_bars
+  sample_rate: 30.72e6
+  deviation_pp_hz: 6.0e6
+  gain_db: -6
+
+multi_drone:
+  center_channel: R4     # 5769 MHz, the centre of the pair
+  drones:
+    - { pattern: color_bars,    offset_mhz: -9.0, level_db: -6 }   # ~5760 MHz, now the WEAK one
+    - { pattern: color_bars100, offset_mhz:  9.0, level_db: 0 }    # ~5778 MHz, now the STRONG one
+  hold_s: 0

@@ -28,6 +28,8 @@ _lang = DEFAULT_LANGUAGE
 # Ukrainian catalog: English key -> Ukrainian text.
 # Keys must match the English strings used in the code exactly.
 CATALOG_UK: Dict[str, str] = {
+    "Two drones, the far one stronger (diagnostic)": "Два дрони, дальній сильніший (діагностика)",
+    "Two drones at the same level (5.8 GHz)": "Два дрони однакового рівня (5.8 ГГц)",
     "Verbose": "Детально",
     "Repeat the notes about how the board had to be configured on every run. Off, each one is shown once per session — a board that always needs the same accommodation says so once, not every Start. Problems with the signal are never filed away here.": "Повторювати нотатки про те, як довелося налаштувати плату, на кожному запуску. Якщо вимкнено — кожна показується раз за сеанс: плата, якій завжди потрібне те саме, скаже про це один раз, а не на кожному Старті. Проблеми із сигналом сюди не ховаються ніколи.",
     "Failed to start the GUI:": "Не вдалося запустити GUI:",
