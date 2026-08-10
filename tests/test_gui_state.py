@@ -215,3 +215,49 @@ def test_a_language_rebuild_still_replaces_the_log_rather_than_doubling_it(qt_ap
     before = w.log.toPlainText().count("null")
     w._build_ui(w._capture_state())          # what switching language does
     assert w.log.toPlainText().count("null") == before
+
+
+# --------------------------- the verbose switch -----------------------------
+def _warn_through_the_hook(w, text, category):
+    """Raise a warning the way the sink does and let the queued signal arrive."""
+    import warnings
+    warnings.warn(text, category)
+    QtWidgets.QApplication.processEvents()
+    return w.log.toPlainText().count(text)
+
+
+@pytest.mark.parametrize("checked", [True, False])
+def test_the_verbose_switch_survives_a_restart(qt_app, settings, checked):
+    w = _window(settings)
+    w.chk_verbose.setChecked(checked)
+    w._save_state()
+    assert _window(settings).chk_verbose.isChecked() is checked
+
+
+def test_a_device_detail_is_shown_once_per_session_by_default(qt_app, settings):
+    """A board that always needs the same accommodation says so on every Start,
+    and by the third one it is noise the operator reads past."""
+    from fpv_emulator.backends import DeviceDetail
+    w = _window(settings)
+    text = "the FIR filter was switched off"
+    assert _warn_through_the_hook(w, text, DeviceDetail) == 1
+    assert _warn_through_the_hook(w, text, DeviceDetail) == 1
+
+
+def test_verbose_repeats_the_detail_on_every_run(qt_app, settings):
+    from fpv_emulator.backends import DeviceDetail
+    w = _window(settings)
+    w.chk_verbose.setChecked(True)
+    text = "the FIR filter was switched off, again"
+    assert _warn_through_the_hook(w, text, DeviceDetail) == 1
+    assert _warn_through_the_hook(w, text, DeviceDetail) == 2
+
+
+def test_an_ordinary_warning_is_never_filed_away(qt_app, settings):
+    """Aliasing, a dead transmitter, a rate that does not fit — those repeat
+    whatever the switch says, because they mean the signal is wrong."""
+    w = _window(settings)
+    assert not w.chk_verbose.isChecked()
+    text = "Aliasing risk: the pattern folds past Nyquist"
+    assert _warn_through_the_hook(w, text, UserWarning) == 1
+    assert _warn_through_the_hook(w, text, UserWarning) == 2

@@ -95,6 +95,16 @@ class BaseSink(ABC):
         }
 
 
+class DeviceDetail(UserWarning):
+    """How the device had to be configured — not a problem with the signal.
+
+    A board that always needs the same accommodation says so on every run, and
+    after the third time it is noise the operator reads past. Marking the class
+    lets the GUI file these under its verbose switch while leaving anything that
+    means "what is on air is not what you asked for" in plain sight.
+    """
+
+
 # ---------------------------------------------------------------------------
 #  Pluto backend (pyadi-iio)
 # ---------------------------------------------------------------------------
@@ -332,7 +342,7 @@ class PlutoSink(BaseSink):
         if not self._warned_mismatch:
             note = firmware_mod.mismatch_warning(self.cfg.firmware, self._firmware)
             if note:
-                warnings.warn(note, stacklevel=2)
+                warnings.warn(note, DeviceDetail, stacklevel=2)
             self._warned_mismatch = True
 
         # Boards disagree about the sample rate: the Pluto+ here reaches 30.72
@@ -363,7 +373,7 @@ class PlutoSink(BaseSink):
             # information and still gets through.
             note = apply_sample_rate(sdr, phy_name, self.cfg.fs, self.cfg.firmware)
             if note and note != self._rate_note:
-                warnings.warn(note, stacklevel=2)
+                warnings.warn(note, DeviceDetail, stacklevel=2)
             self._rate_note = note
             _set("tx_lo", int(self.cfg.freq_hz), " Hz")
             rf_bw = int(self.cfg.rf_bw_hz or min(self.cfg.fs, 20e6))

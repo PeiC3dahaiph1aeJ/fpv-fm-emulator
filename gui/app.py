@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from fpv_emulator import __version__
-from fpv_emulator.backends import TxConfig, make_sink
+from fpv_emulator.backends import DeviceDetail, TxConfig, make_sink
 from fpv_emulator.bands import load_band_table
 from fpv_emulator.config import list_scenarios, load_scenario
 from fpv_emulator.firmware import AUTO, PROFILE_KEYS, profile_label
@@ -138,7 +138,7 @@ _STATE_TYPES = {
     "band": str, "channel": str, "firmware": str, "hw": str,
     "standard": str, "pattern": str, "mode": str,
     "freq": float, "fs": float, "dev": float,
-    "gain": int, "burst": _as_bool,
+    "gain": int, "burst": _as_bool, "verbose": _as_bool,
 }
 
 
@@ -161,6 +161,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.worker = None
         self._close_attempts = 0
         self._prev_showwarning = None
+        # device-detail texts already shown this session (see _install_warning_hook)
+        self._detail_seen: set = set()
 
         self._build_ui(self._restore_state())
         self._log(t("FPV FM emulator v{version}", version=__version__))
@@ -170,11 +172,23 @@ class MainWindow(QtWidgets.QMainWindow):
         self._install_warning_hook()
 
     def _install_warning_hook(self) -> None:
-        """Mirror every ``warnings.warn()`` into the event log."""
+        """Mirror every ``warnings.warn()`` into the event log.
+
+        Device-detail warnings say how the board had to be configured — true on
+        every run for a board that always needs it, and noise by the third Start.
+        They are shown once per session, and on every run only when the verbose
+        switch is on. Everything else always goes through: a warning that the
+        signal is not what was asked for must never be filed away.
+        """
         previous = warnings.showwarning
 
         def _to_log(message, category, filename, lineno, file=None, line=None):
             try:
+                if isinstance(category, type) and issubclass(category, DeviceDetail):
+                    text = str(message)
+                    if not self.chk_verbose.isChecked() and text in self._detail_seen:
+                        return
+                    self._detail_seen.add(text)
                 self.warning_logged.emit(t("[WARN] {msg}", msg=message))
             except RuntimeError:
                 pass                       # window already destroyed
@@ -387,7 +401,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self.lbl_read.setWordWrap(True)
         col.addWidget(self.lbl_read)
 
-        col.addWidget(QtWidgets.QLabel(t("Event log:")))
+        hb_log = QtWidgets.QHBoxLayout()
+        hb_log.addWidget(QtWidgets.QLabel(t("Event log:")))
+        hb_log.addStretch(1)
+        self.chk_verbose = QtWidgets.QCheckBox(t("Verbose"))
+        self.chk_verbose.setToolTip(
+            t("Repeat the notes about how the board had to be configured on every "
+              "run. Off, each one is shown once per session — a board that always "
+              "needs the same accommodation says so once, not every Start. Problems "
+              "with the signal are never filed away here."))
+        hb_log.addWidget(self.chk_verbose)
+        col.addLayout(hb_log)
         self.log = QtWidgets.QPlainTextEdit()
         self.log.setReadOnly(True)
         self.log.setMaximumBlockCount(500)
@@ -417,6 +441,7 @@ class MainWindow(QtWidgets.QMainWindow):
             "fs": self.sp_fs.value(),
             "dev": self.sp_dev.value(),
             "burst": self.chk_burst.isChecked(),
+            "verbose": self.chk_verbose.isChecked(),
             "gain": self.sl_gain.value(),
             "mode": self.cb_mode.currentData() or "",
             "log": self.log.toPlainText(),
@@ -503,6 +528,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 spin.blockSignals(False)
 
         self.chk_burst.setChecked(bool(state.get("burst")))
+        self.chk_verbose.setChecked(bool(state.get("verbose")))
 
         gain = int(state.get("gain", self.sl_gain.value()))
         self.sl_gain.blockSignals(True)

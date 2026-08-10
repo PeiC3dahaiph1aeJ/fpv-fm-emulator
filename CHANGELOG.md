@@ -15,6 +15,19 @@ error dialog, at the top of `probe`, and via `--version`.
 
 ---
 
+## 0.3.0 — 2026-08-10
+
+### Added
+- **A «Verbose» switch beside the event log.** Notes about how the board had to be
+  configured — the FIR filter being dropped, a firmware profile contradicting the
+  board — are true on every run for a board that always needs them, and noise by
+  the third Start. They now appear once per session, or on every run with the
+  switch on. Anything meaning "what is on air is not what you asked for" is never
+  filed away: aliasing, a transmitter that did not start, a rate that does not fit.
+  The distinction is a warning class, not a text match.
+
+---
+
 ## 0.2.1 — 2026-08-10
 
 Found by an adversarial review of 0.2.0: 29 candidate findings, 26 refuted, 3 real.

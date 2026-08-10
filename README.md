@@ -18,7 +18,7 @@ with scenarios (band sweep, power ramp, several "drones" at once) or manually.
 
 ## Download (no git, no terminal)
 
-1. **[⬇ Download ZIP — v0.2.1](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/tags/v0.2.1.zip)** — the tagged
+1. **[⬇ Download ZIP — v0.3.0](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/tags/v0.3.0.zip)** — the tagged
    version this README describes, and the one to quote if something misbehaves.
    ([all versions](https://github.com/Zapadenec1982/fpv-fm-emulator/tags) · [the moving tip of `main`](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/heads/main.zip),
    which changes between releases.)
@@ -79,7 +79,7 @@ config/
   scenarios/*.yaml example scenarios
 scripts/probe_pluto.py   standalone hardware probe
 CHANGELOG.md      what changed in each version
-tests/            offline core tests (pytest, 163 of them)
+tests/            offline core tests (pytest, 168 of them)
 ```
 
 ---
@@ -105,7 +105,9 @@ It opens right away with a working profile (color_bars, 20 MSPS, PAL50, backend
 - **Frequency:** band/channel or a manually entered carrier.
 - **Signal:** standard, pattern (preview in color), sample rate, deviation.
 - **Power:** slider, **changes at runtime** while transmitting.
-- **Mode:** manual carrier or a ready-made scenario; Start/Stop; event log.
+- **Mode:** manual carrier or a ready-made scenario; Start/Stop; event log with a
+  **Verbose** switch — off, a note about how the board had to be configured appears
+  once per session instead of on every Start.
 - **Language:** a selector in the **Output** panel switches the interface between
   English and Ukrainian.
 
@@ -312,7 +314,7 @@ the changelog's newest entry disagree, so they cannot drift apart.
 ```bash
 python -m pytest tests/ -q
 ```
-163 offline tests, no hardware required. They cover: band/channel lookup (including
+168 offline tests, no hardware required. They cover: band/channel lookup (including
 ambiguous bare names), the HW-range guard, composite video timing and levels, the
 color path (subcarrier, burst placement, PAL V-phase alternation), FM invariants and
 the continuity of the cyclic-buffer seam, multi-drone summation and its carrier

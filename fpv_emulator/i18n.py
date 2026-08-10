@@ -28,6 +28,8 @@ _lang = DEFAULT_LANGUAGE
 # Ukrainian catalog: English key -> Ukrainian text.
 # Keys must match the English strings used in the code exactly.
 CATALOG_UK: Dict[str, str] = {
+    "Verbose": "Детально",
+    "Repeat the notes about how the board had to be configured on every run. Off, each one is shown once per session — a board that always needs the same accommodation says so once, not every Start. Problems with the signal are never filed away here.": "Повторювати нотатки про те, як довелося налаштувати плату, на кожному запуску. Якщо вимкнено — кожна показується раз за сеанс: плата, якій завжди потрібне те саме, скаже про це один раз, а не на кожному Старті. Проблеми із сигналом сюди не ховаються ніколи.",
     "Failed to start the GUI:": "Не вдалося запустити GUI:",
     "Hint: run setup.bat again or check the dependencies (pip install -r requirements.txt).": "Підказка: запустіть setup.bat ще раз або перевірте залежності (pip install -r requirements.txt).",
     "FPV FM emulator v{version}": "FPV FM-емулятор v{version}",
