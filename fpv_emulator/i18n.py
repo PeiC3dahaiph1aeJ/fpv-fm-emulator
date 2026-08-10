@@ -28,6 +28,7 @@ _lang = DEFAULT_LANGUAGE
 # Ukrainian catalog: English key -> Ukrainian text.
 # Keys must match the English strings used in the code exactly.
 CATALOG_UK: Dict[str, str] = {
+    "FPV FM emulator v{version}": "FPV FM-емулятор v{version}",
     "Auto": "Авто",
     "Firmware:": "Прошивка:",
     "Firmware: not reported": "Прошивка: не повідомляється",

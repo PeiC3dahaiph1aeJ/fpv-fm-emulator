@@ -10,6 +10,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from fpv_emulator import __version__
 from fpv_emulator.cli import _force_utf8_stdout, _preapply_language
 from fpv_emulator.i18n import available_languages, get_language, set_language, t
 from fpv_emulator.probe import probe
@@ -32,6 +33,7 @@ def main() -> int:
     args = ap.parse_args()
     set_language(args.lang)
 
+    print(t("FPV FM emulator v{version}", version=__version__))
     res = probe(uri=args.uri, do_range_test=not args.no_range_test)
     print(res.summary())
     return 0 if res.connected else 2

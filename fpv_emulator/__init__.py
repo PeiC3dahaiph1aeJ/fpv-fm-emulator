@@ -6,7 +6,10 @@ depend on hardware — it can be run offline and covered by tests. Transmission
 over the air goes through the Pluto backend (pyadi-iio) or into a file.
 """
 
-__version__ = "0.1.0"
+#: Single source of truth. Bump it together with the CHANGELOG entry — a test
+#: checks that the two agree. Read without importing by run_gui.py, which needs
+#: it precisely when this package is what failed to import.
+__version__ = "0.2.0"
 
 from .bands import BandTable, load_band_table
 from .video import VideoStandard, PAL50, NTSC60, list_patterns, generate_composite

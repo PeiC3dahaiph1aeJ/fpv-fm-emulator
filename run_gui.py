@@ -5,10 +5,36 @@ Easiest way — double-click run_gui.bat.
 Or from a terminal:  .venv\\Scripts\\python.exe run_gui.py
 """
 import os
+import re
 import sys
 import traceback
 
 _LOG_NAME = "startup_error.log"
+
+
+def _version() -> str:
+    """The version — including when the package is what is broken.
+
+    Import it if the package works. If it does not, read the literal out of the
+    source instead: this function exists for exactly the case where the import
+    failed, and "which build is this?" is the first question about a launcher
+    that will not start.
+    """
+    try:
+        from fpv_emulator import __version__
+        return __version__
+    except Exception:
+        pass
+    try:
+        init = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "fpv_emulator", "__init__.py")
+        with open(init, encoding="utf-8") as fh:
+            found = re.search(r"""__version__\s*=\s*["']([^"']+)["']""", fh.read())
+        if found:
+            return found.group(1)
+    except Exception:
+        pass
+    return "?"
 
 
 def _t(text: str) -> str:
@@ -57,7 +83,7 @@ def _show_error(message: str, *, details: str = "", hint: str = "") -> None:
     """
     _resolve_language()
     title = _t("FPV emulator — startup error")
-    parts = [_t(message)]
+    parts = ["FPV FM emulator v%s" % _version(), _t(message)]
     if details:
         parts.append(details.strip("\n"))
     if hint:

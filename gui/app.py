@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from fpv_emulator import __version__
 from fpv_emulator.backends import TxConfig, make_sink
 from fpv_emulator.bands import load_band_table
 from fpv_emulator.config import list_scenarios, load_scenario
@@ -162,6 +163,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._prev_showwarning = None
 
         self._build_ui(self._restore_state())
+        self._log(t("FPV FM emulator v{version}", version=__version__))
         # run_gui.bat starts pythonw — stderr is discarded, so warnings.warn() from the
         # generator would never reach the operator. Route them into the event log.
         self.warning_logged.connect(self._log, QtCore.Qt.QueuedConnection)
@@ -193,8 +195,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # -- ui construction (re-runnable: used to retranslate in place) ---------
     def _build_ui(self, state: dict | None = None):
+        # The version goes in the title because that is where it survives a
+        # screenshot, which is how a problem usually arrives from a colleague.
         self.setWindowTitle(
-            t("FPV FM emulator for Pluto+ · test signal for FPV detectors"))
+            t("FPV FM emulator for Pluto+ · test signal for FPV detectors")
+            + f"  ·  v{__version__}")
 
         central = QtWidgets.QWidget()
         root = QtWidgets.QHBoxLayout(central)

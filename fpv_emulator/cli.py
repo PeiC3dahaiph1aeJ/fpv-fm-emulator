@@ -77,6 +77,8 @@ def _fmt_event(e: dict) -> str:
 
 
 def cmd_probe(args) -> int:
+    # printed with the result, so a pasted probe says which build produced it
+    print(t("FPV FM emulator v{version}", version=__version__))
     res = probe(uri=args.uri, do_range_test=not args.no_range_test)
     print(res.summary())
     return 0 if res.connected else 2

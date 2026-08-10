@@ -76,7 +76,8 @@ config/
   bands.yaml      channel frequencies (editable)
   scenarios/*.yaml example scenarios
 scripts/probe_pluto.py   standalone hardware probe
-tests/            offline core tests (pytest, 135 of them)
+CHANGELOG.md      what changed in each version
+tests/            offline core tests (pytest, 145 of them)
 ```
 
 ---
@@ -293,11 +294,23 @@ For installing SoapySDR see `requirements-hw.txt` (pip does not install it).
 
 ---
 
+## Version
+
+One number, in `fpv_emulator/__init__.py`, shown in the window title, on the first
+line of the event log, in the startup error dialog, at the top of `probe`, and via
+`--version`. If something misbehaves, that number is the first thing to quote — the
+whole point is to answer "which build is this?" from a screenshot.
+
+See [CHANGELOG.md](CHANGELOG.md) for what changed. A test fails if the version and
+the changelog's newest entry disagree, so they cannot drift apart.
+
+---
+
 ## Tests
 ```bash
 python -m pytest tests/ -q
 ```
-135 offline tests, no hardware required. They cover: band/channel lookup (including
+145 offline tests, no hardware required. They cover: band/channel lookup (including
 ambiguous bare names), the HW-range guard, composite video timing and levels, the
 color path (subcarrier, burst placement, PAL V-phase alternation), FM invariants and
 the continuity of the cyclic-buffer seam, multi-drone summation and its carrier
