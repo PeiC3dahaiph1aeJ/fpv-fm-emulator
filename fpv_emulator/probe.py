@@ -32,6 +32,11 @@ class ProbeResult:
     traceback_text: Optional[str] = None       # full traceback of the first failure
     lib_versions: Dict[str, str] = field(default_factory=dict)
     can_transmit: Optional[bool] = None        # False when the image is RX-only
+    # What the board says it runs, as a ready-made line. Kept apart from
+    # inferred_preset on purpose: that one is the AD9363-vs-AD9361 tuning range
+    # ('stock'/'hacked'), a different axis that happens to share the vocabulary.
+    firmware_text: Optional[str] = None
+    firmware_key: Optional[str] = None         # "" when the version is unrecognised
 
     def summary(self) -> str:
         if not self.connected:
@@ -55,6 +60,8 @@ class ProbeResult:
         for k in ("hw_model", "hw_serial", "fw_version"):
             if k in self.attrs:
                 lines.append(f"  {k}: {self.attrs[k]}")
+        if self.firmware_text:
+            lines.append("  " + self.firmware_text)
         if self.tx_lo_max_hz:
             lines.append(
                 "  " + t("TX LO: {min} – {max} MHz",
@@ -105,6 +112,10 @@ def probe(uri: str = "ip:192.168.2.1", do_range_test: bool = True) -> ProbeResul
         # images have no transmit DMA at all — worth saying outright rather than
         # letting it fail later with an unrelated-looking error.
         try:
+            from .firmware import identify
+            fw = identify(ctx)
+            res.firmware_text = fw.describe()
+            res.firmware_key = fw.key
             from .iio_layout import detect_layout
             layout = detect_layout(ctx)
             res.messages.extend(layout.describe().splitlines())
@@ -123,7 +134,19 @@ def probe(uri: str = "ip:192.168.2.1", do_range_test: bool = True) -> ProbeResul
     if do_range_test:
         try:
             import adi  # type: ignore
-            sdr = adi.Pluto(uri=uri)
+            # Open it the way the transmitter would. A board whose IIO devices
+            # are named differently must not fail here while `tx` works — a
+            # diagnostic that stops predicting the thing it exists to predict is
+            # worse than no diagnostic. The context from step 1 is reused; a
+            # second one on the same device invites EBUSY.
+            pluto_cls = adi.Pluto
+            if ctx is not None:
+                try:
+                    from .iio_layout import detect_layout, pluto_class_for
+                    pluto_cls = pluto_class_for(detect_layout(ctx))
+                except Exception:
+                    pass
+            sdr = pluto_cls(uri=uri)
             res.connected = True
             reachable: List[float] = []
             for f in _TEST_FREQS_HZ:

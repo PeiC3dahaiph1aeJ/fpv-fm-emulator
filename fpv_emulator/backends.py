@@ -13,10 +13,11 @@ import time
 import warnings
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Tuple
 
 import numpy as np
 
+from . import firmware as firmware_mod
 from .i18n import t
 
 
@@ -28,6 +29,9 @@ class TxConfig:
     rf_bw_hz: Optional[float] = None
     uri: str = "ip:192.168.2.1"     # typical Pluto URI over USB-Ethernet
     device: str = "driver=hackrf"   # SoapySDR device args (e.g. driver=hackrf|lime|uhd)
+    # Which ways of setting the sample rate we may try — see firmware.py.
+    # Only PlutoSink reads it; for the soapy/file/null sinks it means nothing.
+    firmware: str = firmware_mod.AUTO
 
 
 class BaseSink(ABC):
@@ -132,12 +136,137 @@ def set_sample_rate_without_fir(sdr, phy_name: str, rate: float) -> Optional[flo
     return None
 
 
+#: pyadi property -> the phy channel attribute that publishes its permitted values
+_CHAN_ATTR = {
+    "sample_rate": "sampling_frequency_available",
+    "tx_rf_bandwidth": "rf_bandwidth_available",
+    "tx_hardwaregain_chan0": "hardwaregain_available",
+}
+
+
+def available_text(sdr, phy_name: str, attr: str) -> str:
+    """What the board publishes as acceptable for ``attr``, verbatim.
+
+    The permitted range lives on the phy channel, not on the pyadi object:
+    sample_rate maps to voltage0's sampling_frequency and pyadi exposes no
+    ``*_available`` for it at all. Reading it directly is the one thing that
+    turns an EINVAL into something actionable — "it accepts [2083333 1 61440000]"
+    rather than "invalid argument", which is what four different causes all
+    looked like before.
+    """
+    try:
+        chan_attr = _CHAN_ATTR.get(attr)
+        if chan_attr is None:
+            return str(getattr(sdr, attr + "_available", "") or "")
+        phy = sdr.ctx.find_device(phy_name)
+        for ch in phy.channels:
+            if ch.output and ch.id == "voltage0" and chan_attr in ch.attrs:
+                return str(ch.attrs[chan_attr].value)
+    except Exception:
+        pass
+    return ""
+
+
+def rejected_error(attr: str, value, unit: str, err, avail: str = "",
+                   hint: str = "") -> RuntimeError:
+    """The 'device said no' error, with the value, the range and any advice."""
+    return RuntimeError(
+        t("The device rejected {attr} = {value}{unit} ({err}).{avail}",
+          attr=attr, value=value, unit=unit, err=str(err),
+          avail=(" " + t("It accepts: {range}", range=avail)) if avail else "")
+        + ((" " + hint) if hint else "")
+    )
+
+
+def allowed_sample_rates(sdr, phy_name: str) -> Optional[Tuple[float, float]]:
+    """(min, max) sample rate the board publishes, or None if it publishes none."""
+    try:
+        nums = [float(x) for x in
+                available_text(sdr, phy_name, "sample_rate").strip("[] ").split()]
+    except ValueError:
+        return None
+    return (nums[0], nums[2]) if len(nums) >= 3 else None
+
+
+def apply_sample_rate(sdr, phy_name: str, rate: float,
+                      profile_key: str = firmware_mod.AUTO) -> Optional[str]:
+    """Set the data rate under a firmware profile; return a warning text or None.
+
+    The profile decides which routes may be tried, not what the board is:
+    ``auto`` tries pyadi's filtered path and falls back, ``adi`` only tries
+    pyadi's, ``tezuka`` goes straight to the unfiltered write. Under ``auto``
+    this is byte-for-byte the try-then-fall-back order that the Pluto+ is known
+    to work with, so the default moves nothing.
+
+    Raises RuntimeError naming the value, the range the board publishes, and —
+    when a manual profile is what closed the door — how to reopen it.
+    """
+    prof = firmware_mod.profile(profile_key)
+    refused: Optional[BaseException] = None
+
+    if prof.try_pyadi_fir:
+        try:
+            sdr.sample_rate = int(rate)
+            return None
+        except Exception as exc:
+            refused = exc
+            if not prof.allow_fir_off:
+                raise rejected_error(
+                    "sample_rate", int(rate), " Hz", exc,
+                    available_text(sdr, phy_name, "sample_rate"),
+                    t("The {profile} firmware profile does not set the rate any "
+                      "other way. Switch the profile to {auto} to let the board "
+                      "be asked without the FIR filter.",
+                      profile=firmware_mod.profile_label(prof.key),
+                      auto=t("Auto")),
+                ) from exc
+
+    if prof.allow_fir_off:
+        got = set_sample_rate_without_fir(sdr, phy_name, rate)
+        if got is not None and refused is not None:
+            return t("This board refused the interpolating FIR filter that comes "
+                     "with the sample rate; {rate} MSPS was set with the filter "
+                     "off. Image rejection either side of the passband is a little "
+                     "weaker — the video itself is unchanged.",
+                     rate=f"{got/1e6:.2f}")
+        if got is not None:
+            return t("The {profile} firmware profile set {rate} MSPS with the FIR "
+                     "filter off, without trying the filtered path first. Image "
+                     "rejection either side of the passband is a little weaker — "
+                     "the video itself is unchanged.",
+                     profile=firmware_mod.profile_label(prof.key),
+                     rate=f"{got/1e6:.2f}")
+
+    if refused is not None:
+        raise rejected_error("sample_rate", int(rate), " Hz", refused,
+                             available_text(sdr, phy_name, "sample_rate"))
+    # Nothing raised, nothing took: the unfiltered write is the only route this
+    # profile allows and the board did not land on the rate we asked for.
+    raise RuntimeError(t(
+        "Setting the sample rate to {rate} MSPS with the FIR filter off did not "
+        "take (firmware profile: {profile}).{avail}",
+        rate=f"{rate/1e6:.2f}", profile=firmware_mod.profile_label(prof.key),
+        avail=(" " + t("It accepts: {range}",
+                       range=available_text(sdr, phy_name, "sample_rate")))
+        if available_text(sdr, phy_name, "sample_rate") else ""))
+
+
 class PlutoSink(BaseSink):
     """Transmit through an ADALM-Pluto / Pluto+ (pyadi-iio)."""
 
     def __init__(self, cfg: TxConfig):
         super().__init__(cfg)
         self._sdr = None
+        self._firmware = firmware_mod.Firmware()
+        self._warned_mismatch = False
+
+    def info(self) -> dict:
+        d = super().info()
+        # The profile as requested and the firmware as reported, separately: an
+        # operator debugging a board needs to see that those two can differ.
+        d["firmware_profile"] = firmware_mod.profile(self.cfg.firmware).key
+        d["firmware"] = self._firmware.describe()
+        return d
 
     def _ensure_open(self) -> None:
         if self._sdr is not None:
@@ -159,7 +288,13 @@ class PlutoSink(BaseSink):
         try:
             import iio  # noqa: WPS433
             from .iio_layout import detect_layout, pluto_class_for
-            layout = detect_layout(iio.Context(self.cfg.uri))
+            # One context, used for both questions. Opening a second one on a
+            # device whose DMA is being torn down is how the buffer ends up
+            # stale, so the identity read borrows the context rather than
+            # making its own. It only labels things — see firmware.py.
+            ctx = iio.Context(self.cfg.uri)
+            self._firmware = firmware_mod.identify(ctx)
+            layout = detect_layout(ctx)
             phy_name = layout.phy or phy_name
             if not layout.can_transmit:
                 raise RuntimeError(
@@ -186,72 +321,18 @@ class PlutoSink(BaseSink):
             try:
                 setattr(sdr, attr, value)
             except Exception as exc:
-                # The permitted range lives on the phy channel, not on the pyadi
-                # object: sample_rate maps to voltage0's sampling_frequency, and
-                # pyadi exposes no *_available for it at all. Read it directly —
-                # the range is the one piece of information that makes an EINVAL
-                # actionable ("it wants <= 30.72 MSPS" rather than "invalid").
-                avail = ""
-                _CHAN_ATTR = {
-                    "sample_rate": "sampling_frequency_available",
-                    "tx_rf_bandwidth": "rf_bandwidth_available",
-                    "tx_hardwaregain_chan0": "hardwaregain_available",
-                }
-                try:
-                    chan_attr = _CHAN_ATTR.get(attr)
-                    if chan_attr is not None:
-                        phy = sdr.ctx.find_device(phy_name)
-                        for ch in phy.channels:
-                            if ch.output and ch.id == "voltage0" and chan_attr in ch.attrs:
-                                avail = str(ch.attrs[chan_attr].value)
-                                break
-                    else:
-                        avail = str(getattr(sdr, attr + "_available", "") or "")
-                except Exception:
-                    pass
-                raise RuntimeError(
-                    t("The device rejected {attr} = {value}{unit} ({err}).{avail}",
-                      attr=attr, value=value, unit=unit, err=str(exc),
-                      avail=(" " + t("It accepts: {range}", range=avail)) if avail else "")
-                ) from exc
+                raise rejected_error(attr, value, unit, exc,
+                                     available_text(sdr, phy_name, attr)) from exc
 
-        def _allowed_range(chan_attr: str):
-            """(min, max) the device publishes for a phy TX channel attribute."""
-            try:
-                phy = sdr.ctx.find_device(phy_name)
-                for ch in phy.channels:
-                    if ch.output and ch.id == "voltage0" and chan_attr in ch.attrs:
-                        nums = [float(x) for x in
-                                ch.attrs[chan_attr].value.strip("[] ").split()]
-                        if len(nums) >= 3:
-                            return nums[0], nums[2]
-            except Exception:
-                pass
-            return None
-
-        def _set_sample_rate(rate: int) -> None:
-            """Set the data rate, retrying without the FIR filter if need be.
-
-            Boards that take pyadi's filter keep it — only the ones that refuse
-            it fall back, so nothing moves for the Pluto+.
-            """
-            try:
-                sdr.sample_rate = rate
-                return
-            except Exception:
-                pass
-            got = set_sample_rate_without_fir(sdr, phy_name, rate)
-            if got is not None:
-                warnings.warn(
-                    t("This board refused the interpolating FIR filter that comes "
-                      "with the sample rate; {rate} MSPS was set with the filter "
-                      "off. Image rejection either side of the passband is a little "
-                      "weaker — the video itself is unchanged.",
-                      rate=f"{got/1e6:.2f}"),
-                    stacklevel=2,
-                )
-                return
-            _set("sample_rate", rate, " Hz")     # raises, with the full diagnosis
+        # A manual profile that contradicts the board is worth saying out loud
+        # once — but only once per sink, because _reopen() comes back through
+        # here on every arming retry and a repeated notice would push the rest
+        # of the log out of view.
+        if not self._warned_mismatch:
+            note = firmware_mod.mismatch_warning(self.cfg.firmware, self._firmware)
+            if note:
+                warnings.warn(note, stacklevel=2)
+            self._warned_mismatch = True
 
         # Boards disagree about the sample rate: the Pluto+ here reaches 30.72
         # MSPS, this Nano publishes 2.083–61.44. Refuse an out-of-range rate up
@@ -260,7 +341,7 @@ class PlutoSink(BaseSink):
         # matches on scales with it. A quietly substituted rate would transmit a
         # carrier that looks right on a spectrum analyser and that the detector
         # cannot recognise, which is the worst failure this tool can have.
-        rng = _allowed_range("sampling_frequency_available")
+        rng = allowed_sample_rates(sdr, phy_name)
         if rng and not (rng[0] <= self.cfg.fs <= rng[1]):
             del sdr
             raise RuntimeError(t(
@@ -273,7 +354,9 @@ class PlutoSink(BaseSink):
                 max=f"{rng[1]/1e6:.2f}"))
 
         try:
-            _set_sample_rate(int(self.cfg.fs))
+            note = apply_sample_rate(sdr, phy_name, self.cfg.fs, self.cfg.firmware)
+            if note:
+                warnings.warn(note, stacklevel=2)
             _set("tx_lo", int(self.cfg.freq_hz), " Hz")
             rf_bw = int(self.cfg.rf_bw_hz or min(self.cfg.fs, 20e6))
             _set("tx_rf_bandwidth", rf_bw, " Hz")

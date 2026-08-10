@@ -18,6 +18,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from fpv_emulator.backends import TxConfig, make_sink
 from fpv_emulator.bands import load_band_table
 from fpv_emulator.config import list_scenarios, load_scenario
+from fpv_emulator.firmware import AUTO, PROFILE_KEYS, profile_label
 from fpv_emulator.fm import occupied_bandwidth_hz
 from fpv_emulator.i18n import LANGUAGES, detect_language, get_language, set_language, t
 from fpv_emulator.scenarios import ScenarioRunner
@@ -215,6 +216,22 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ed_uri = QtWidgets.QLineEdit("ip:192.168.2.1")
         self.ed_device = QtWidgets.QLineEdit("driver=hackrf")   # SoapySDR args
         self.ed_file = QtWidgets.QLineEdit("out.iq")
+        # Firmware profile: which ways of setting the sample rate the sink may
+        # try. Deliberately NOT called stock/hacked — those two words already
+        # mean the AD9363-vs-AD9361 tuning range in the «HW range» box below,
+        # and one word for two axes gets the wrong one set.
+        self.cb_fw = QtWidgets.QComboBox()
+        for key in PROFILE_KEYS:
+            self.cb_fw.addItem(profile_label(key), key)
+        i_fw = self.cb_fw.findData(
+            str(self.settings.value("firmware_profile", AUTO) or AUTO))
+        self.cb_fw.setCurrentIndex(i_fw if i_fw >= 0 else 0)
+        self.cb_fw.setToolTip(
+            t("Auto tries the filtered path first and falls back if the board "
+              "refuses it — right for both boards here. Pick a firmware only to "
+              "force one route: Tezuka skips the attempt, Analog Devices refuses "
+              "to fall back."))
+        self.cb_fw.currentIndexChanged.connect(self._on_firmware_changed)
         self.cb_lang = QtWidgets.QComboBox()
         for code, label in LANGUAGES.items():
             self.cb_lang.addItem(label, code)
@@ -224,6 +241,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.cb_lang.currentIndexChanged.connect(self._on_language_changed)
         f.addRow(t("Backend:"), self.cb_backend)
         f.addRow(t("URI Pluto:"), self.ed_uri)
+        f.addRow(t("Firmware:"), self.cb_fw)
         f.addRow(t("SDR (soapy):"), self.ed_device)
         f.addRow(t("File (file):"), self.ed_file)
         f.addRow(t("Language:"), self.cb_lang)
@@ -361,6 +379,7 @@ class MainWindow(QtWidgets.QMainWindow):
             "band_index": self.cb_band.currentIndex(),
             "channel": self.cb_channel.currentData(),
             "freq": self.sp_freq.value(),
+            "firmware": self.cb_fw.currentData(),
             "hw": self.cb_hw.currentText(),
             "standard": self.cb_std.currentText(),
             "pattern": self.cb_pattern.currentText(),
@@ -384,6 +403,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 widget.blockSignals(True)
                 widget.setCurrentText(value)
                 widget.blockSignals(False)
+        # findData, not setCurrentText: the labels are translated, the keys are not
+        i_fw = self.cb_fw.findData(state.get("firmware"))
+        if i_fw >= 0:
+            self.cb_fw.blockSignals(True)
+            self.cb_fw.setCurrentIndex(i_fw)
+            self.cb_fw.blockSignals(False)
         self.ed_uri.setText(state.get("uri", ""))
         self.ed_device.setText(state.get("device", ""))
         self.ed_file.setText(state.get("file", ""))
@@ -423,6 +448,14 @@ class MainWindow(QtWidgets.QMainWindow):
             self.cb_mode.setCurrentIndex(mode_index)
 
         self.preview.show_pattern(self.cb_pattern.currentText())
+
+    def _on_firmware_changed(self, index: int):
+        key = self.cb_fw.itemData(index) or AUTO
+        self.settings.setValue("firmware_profile", key)
+        if key != AUTO:
+            self._log(t("[info] firmware profile forced to «{name}» — it stays set "
+                        "for the next launch too. Auto is right for both boards.",
+                        name=profile_label(key)))
 
     def _on_language_changed(self, index: int):
         code = self.cb_lang.itemData(index)
@@ -661,7 +694,8 @@ class MainWindow(QtWidgets.QMainWindow):
         cfg = TxConfig(fs=fs, freq_hz=self.sp_freq.value() * 1e6,
                        gain_db=float(self.sl_gain.value()),
                        uri=self.ed_uri.text(), rf_bw_hz=min(fs, 20e6),
-                       device=self.ed_device.text())
+                       device=self.ed_device.text(),
+                       firmware=str(self.cb_fw.currentData() or AUTO))
         return make_sink(kind, cfg, file_path=self.ed_file.text())
 
     def _on_backend_changed(self, name: str):
@@ -669,6 +703,7 @@ class MainWindow(QtWidgets.QMainWindow):
         running = self.thread is not None
         self.ed_device.setEnabled(soapy and not running)
         self.btn_devices.setEnabled(soapy and not running)
+        self.cb_fw.setEnabled(name == "pluto" and not running)
         if name == "null":
             self._log(t("[WARN] backend = null — dry run, nothing goes on air."))
         elif soapy:
@@ -721,6 +756,12 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.thread is not None:
             return
         self._commit_spin_edits()
+        # A forced profile persists across launches, so it could silently apply
+        # to a board that was never meant to have it. Say so every time.
+        fw_key = str(self.cb_fw.currentData() or AUTO)
+        if fw_key != AUTO and self.cb_backend.currentText() == "pluto":
+            self._log(t("[info] firmware profile: {name} (not auto)",
+                        name=profile_label(fw_key)))
         # anything warned on the way to the sink must be visible (stderr is discarded
         # under pythonw); warnings raised later, on the worker thread, come through
         # the showwarning hook installed in __init__
@@ -793,6 +834,9 @@ class MainWindow(QtWidgets.QMainWindow):
         for w in (self.cb_backend, self.ed_uri, self.cb_mode, self.cb_lang,
                   self.btn_probe, self.sp_freq, self.cb_band, self.cb_channel):
             w.setEnabled(not running)
+        # pluto-only, and frozen on air: the sink is already open, so changing it
+        # mid-run would look like it applied and do nothing
+        self.cb_fw.setEnabled(self.cb_backend.currentText() == "pluto" and not running)
         # these two are additionally soapy-only (see _on_backend_changed)
         soapy = (self.cb_backend.currentText() == "soapy")
         self.ed_device.setEnabled(soapy and not running)

@@ -73,7 +73,7 @@ config/
   bands.yaml      channel frequencies (editable)
   scenarios/*.yaml example scenarios
 scripts/probe_pluto.py   standalone hardware probe
-tests/            offline core tests (pytest, 30 of them)
+tests/            offline core tests (pytest, 121 of them)
 ```
 
 ---
@@ -94,8 +94,8 @@ tests/            offline core tests (pytest, 30 of them)
 
 It opens right away with a working profile (color_bars, 20 MSPS, PAL50, backend
 `pluto`). Everything is controlled with the mouse:
-- **Output:** backend (`pluto` / `soapy` for HackRF and others), URI/device, the
-  "Probe Pluto" and "List SDRs" buttons.
+- **Output:** backend (`pluto` / `soapy` for HackRF and others), URI/device,
+  **Firmware** profile (see below), the "Probe Pluto" and "List SDRs" buttons.
 - **Frequency:** band/channel or a manually entered carrier.
 - **Signal:** standard, pattern (preview in color), sample rate, deviation.
 - **Power:** slider, **changes at runtime** while transmitting.
@@ -201,6 +201,47 @@ a wide signal there may be marginal. On the lower bands (1–3 GHz) the output i
 
 ---
 
+## Firmware profiles
+
+Note this is a different axis from the table above: that one is the *chip's tuning
+range* (the words "stock" and "hacked", also the GUI's "HW range" box), this one is
+the *firmware on the board*.
+
+Setting the sample rate through pyadi is `ad9361_set_bb_rate()` from libad9361,
+which does not only set a rate: it also loads an interpolating FIR filter and
+switches it on. A Pluto+ on stock Analog Devices firmware takes that. A Nano
+PlutoSDR running `tezuka-v0.3.141592653` refuses it with a bare `[Errno 22]
+Invalid argument`, while advertising 2.083–61.44 MSPS as available — which is the
+range an AD9361 has with the FIR *off*. The rate was never the problem.
+
+The profile says what the emulator may **try**, not what the board is:
+
+| Profile | Behaviour | When |
+|---------|-----------|------|
+| **Auto** (default) | Try pyadi's filtered path; if the board refuses, set the rate with the FIR off and say so | Always, unless you have a reason not to. Correct on both boards |
+| **Analog Devices** | pyadi's path only — a refusal is an error, not a fallback | To prove a board really does refuse the filter |
+| **Tezuka** | Set the rate with the FIR off, without the failing attempt first | To keep a known-refusing board off the failed-write path, e.g. during timing measurements |
+
+GUI: the **Firmware** box in the *Output* panel. The choice is remembered between
+sessions, and a forced one is written into the event log on every Start — a sticky
+override that silently followed a different board to the bench would be worse than
+the bug it works around.
+
+CLI: `--firmware auto|adi|tezuka` on `tx`, `latency` and `bench-tx`. Not on `probe`,
+which never sets a sample rate — the flag would parse and change nothing. `probe`
+instead **reports** the firmware it found.
+
+Auto-detection deliberately does not choose the code path. "Tezuka" is a firmware
+*builder* covering some ten different boards, so the version string does not predict
+whether a given board takes the filter; asking the board does. What is read from
+`fw_version` is used to label the board and to warn when a manual override
+contradicts it.
+
+Dropping the FIR costs some rejection of the images either side of the passband.
+It changes nothing about the video, and the occupied bandwidth is unaffected.
+
+---
+
 ## Supported SDRs
 
 The core generates IQ independently of the hardware; the transmit backend is selected
@@ -234,12 +275,15 @@ For installing SoapySDR see `requirements-hw.txt` (pip does not install it).
 ```bash
 python -m pytest tests/ -q
 ```
-50 offline tests, no hardware required. They cover: band/channel lookup (including
+121 offline tests, no hardware required. They cover: band/channel lookup (including
 ambiguous bare names), the HW-range guard, composite video timing and levels, the
 color path (subcarrier, burst placement, PAL V-phase alternation), FM invariants and
 the continuity of the cyclic-buffer seam, multi-drone summation and its carrier
-spacing, the aliasing warnings, and scenario-engine runs against a recording sink
-(sweep, the RF-off pause, tune-before-start ordering, power ramp, live power).
+spacing, the aliasing warnings, scenario-engine runs against a recording sink
+(sweep, the RF-off pause, tune-before-start ordering, power ramp, live power),
+IIO-layout detection on boards that rename their devices, the sample-rate path under
+each firmware profile, that `--firmware` actually reaches every device open, and that
+the Ukrainian catalog covers every string the code and the shipped YAML display.
 
 ---
 

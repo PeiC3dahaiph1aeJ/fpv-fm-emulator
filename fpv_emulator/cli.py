@@ -25,6 +25,7 @@ from .config import (
     list_scenarios,
     load_scenario,
 )
+from .firmware import AUTO, PROFILE_KEYS
 from .fm import to_int16_iq
 from .i18n import available_languages, detect_language, set_language, t
 from .probe import probe
@@ -189,7 +190,8 @@ def cmd_bench_tx(args) -> int:
     trials = bench_command_to_rf(
         buf, args.uri, freq_hz, fs, trials=int(args.trials),
         tx_gain_db=float(args.gain), rx_gain_db=float(args.rx_gain),
-        gap_s=float(args.gap), timeout_s=float(args.timeout), on_trial=show)
+        gap_s=float(args.gap), timeout_s=float(args.timeout),
+        firmware=args.firmware, on_trial=show)
     ok = [x for x in trials if x.ok]
     print()
     print(format_summary(t("command -> RF"), summarize([x.latency_s for x in ok]),
@@ -228,7 +230,7 @@ def _cmd_latency(args) -> int:
     # the same sink the GUI uses — one arming path, with the DMA-playing check
     sink = make_sink("pluto", TxConfig(
         fs=fs, freq_hz=freq_hz, gain_db=float(args.gain),
-        uri=args.uri, rf_bw_hz=min(fs, 40e6)))
+        uri=args.uri, rf_bw_hz=min(fs, 40e6), firmware=args.firmware))
 
     src = SerialLogSource(args.port, int(args.baud))
     print(t("Detector log: {port}@{baud} | pattern: {pattern}",
@@ -389,7 +391,8 @@ def _cmd_tx(args) -> int:
     fs = sp.sample_rate
 
     cfg = TxConfig(fs=fs, freq_hz=0.0, gain_db=sp.gain_db, uri=args.uri,
-                   rf_bw_hz=min(fs, 20e6), device=args.device)
+                   rf_bw_hz=min(fs, 20e6), device=args.device,
+                   firmware=args.firmware)
     sink = make_sink(args.backend, cfg, file_path=args.out)
 
     runner = ScenarioRunner(sink, bt, on_event=lambda e: print(_fmt_event(e)))
@@ -415,6 +418,15 @@ def build_parser() -> argparse.ArgumentParser:
     lang_parent = argparse.ArgumentParser(add_help=False)
     lang_parent.add_argument("--lang", choices=available_languages(),
                              default=argparse.SUPPRESS, help=lang_help)
+    # Firmware profile — only on the subcommands that actually set a sample rate.
+    # `probe` deliberately does not take it: it never sets one, so the flag would
+    # parse, be accepted and change nothing.
+    fw_help = t("firmware profile: which ways of setting the sample rate may be "
+                "tried (default: auto — try the filtered path, fall back)")
+    p.add_argument("--firmware", choices=list(PROFILE_KEYS), default=AUTO, help=fw_help)
+    fw_parent = argparse.ArgumentParser(add_help=False)
+    fw_parent.add_argument("--firmware", choices=list(PROFILE_KEYS),
+                           default=argparse.SUPPRESS, help=fw_help)
     sub = p.add_subparsers(dest="cmd", required=True)
 
     pp = sub.add_parser("probe", parents=[lang_parent],
@@ -453,7 +465,7 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--timeout", default="10")
         p.add_argument("--out", default="", help=t("write the trials to this CSV"))
 
-    pb = sub.add_parser("bench-tx", parents=[lang_parent],
+    pb = sub.add_parser("bench-tx", parents=[lang_parent, fw_parent],
                         help=t("Measure command -> RF using the Pluto's own receiver"))
     _signal_args(pb)
     pb.add_argument("--freq-mhz", default="2450",
@@ -463,7 +475,7 @@ def build_parser() -> argparse.ArgumentParser:
     pb.add_argument("--gap", default="0.3")
     pb.set_defaults(func=cmd_bench_tx)
 
-    pd = sub.add_parser("latency", parents=[lang_parent],
+    pd = sub.add_parser("latency", parents=[lang_parent, fw_parent],
                         help=t("Measure how long the detector takes to report the signal"))
     _signal_args(pd)
     pd.add_argument("--port", required=True, help=t("COM port of the detector, e.g. COM5"))
@@ -523,7 +535,7 @@ def build_parser() -> argparse.ArgumentParser:
     pg.add_argument("--out", default="out.iq")
     pg.set_defaults(func=cmd_gen)
 
-    pt = sub.add_parser("tx", parents=[lang_parent],
+    pt = sub.add_parser("tx", parents=[lang_parent, fw_parent],
                         help=t("Transmit (Pluto/file/null) or run a scenario"))
     pt.add_argument("--backend", default="null", choices=["pluto", "soapy", "file", "null"])
     pt.add_argument("--uri", default="ip:192.168.2.1", help=t("Pluto URI (backend=pluto)"))

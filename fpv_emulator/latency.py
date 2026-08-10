@@ -32,11 +32,14 @@ import random
 import re
 import statistics
 import time
+import warnings
 from dataclasses import asdict, dataclass, field
 from typing import Callable, Dict, List, Optional, Sequence
 
 import numpy as np
 
+from . import firmware as firmware_mod
+from .backends import apply_sample_rate
 from .i18n import t
 from .logsource import LogSource
 
@@ -128,6 +131,7 @@ def bench_command_to_rf(
     gap_s: float = 0.30,
     timeout_s: float = 2.0,
     threshold_db: float = 10.0,
+    firmware: str = firmware_mod.AUTO,
     on_trial: Optional[Callable[[Trial], None]] = None,
 ) -> List[Trial]:
     """Measure command -> RF-present, using the Pluto RX as the witness.
@@ -143,8 +147,25 @@ def bench_command_to_rf(
     """
     import adi  # noqa: WPS433 — hardware dependency, imported lazily
 
-    sdr = adi.Pluto(uri=uri)
-    sdr.sample_rate = int(fs)
+    # This benchmark needs RX as well as TX, so it cannot borrow PlutoSink. It
+    # must still open the device the same way the sink does, or a board whose
+    # IIO devices are named differently — or that refuses pyadi's FIR filter —
+    # would fail here while `tx` worked, and the --firmware flag would be a
+    # control that visibly does nothing.
+    pluto_cls, phy_name = adi.Pluto, "ad9361-phy"
+    try:
+        import iio  # noqa: WPS433
+        from .iio_layout import detect_layout, pluto_class_for
+        layout = detect_layout(iio.Context(uri))
+        phy_name = layout.phy or phy_name
+        pluto_cls = pluto_class_for(layout)
+    except Exception:
+        pass          # cannot inspect: fall back to the stock class
+
+    sdr = pluto_cls(uri=uri)
+    note = apply_sample_rate(sdr, phy_name, fs, firmware)
+    if note:
+        warnings.warn(note, stacklevel=2)
     sdr.tx_rf_bandwidth = int(min(fs, 40e6))
     sdr.rx_rf_bandwidth = int(min(fs, 40e6))
     sdr.tx_lo = int(freq_hz)
