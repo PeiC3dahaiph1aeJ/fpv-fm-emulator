@@ -18,7 +18,7 @@ with scenarios (band sweep, power ramp, several "drones" at once) or manually.
 
 ## Download (no git, no terminal)
 
-1. **[⬇ Download ZIP — v0.5.0](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/tags/v0.5.0.zip)** — the tagged
+1. **[⬇ Download ZIP — v0.5.1](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/tags/v0.5.1.zip)** — the tagged
    version this README describes, and the one to quote if something misbehaves.
    ([all versions](https://github.com/Zapadenec1982/fpv-fm-emulator/tags) · [the moving tip of `main`](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/heads/main.zip),
    which changes between releases.)
@@ -28,7 +28,14 @@ with scenarios (band sweep, power ramp, several "drones" at once) or manually.
 
 **Python 3.9+ is required** — if you do not have it yet, install it from
 [python.org](https://www.python.org/downloads/) and **be sure to tick
-"Add python.exe to PATH"** in the first installer window.
+"Add python.exe to PATH"** in the first installer window. Developed on 3.11; a
+Python released in the last few months often has no numpy or PySide6 wheels yet,
+and `setup.bat` will say so — 3.11 or 3.12 is the safe choice.
+
+> **Do not copy `.venv` between computers.** It records the path of the Python that
+> built it and holds binaries compiled for that exact version, so on another machine
+> it fails inside numpy. Copy the project folder without it (or delete it) and run
+> `setup.bat` there.
 
 If you use git:
 ```bash

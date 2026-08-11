@@ -120,6 +120,28 @@ def _show_error(message: str, *, details: str = "", hint: str = "") -> None:
             pass
 
 
+#: What a .venv built by one Python and run by another looks like from here. The
+#: compiled extensions carry their version in the filename (cp311), so the
+#: interpreter refuses them and numpy reports it as a failed C-extension import.
+_MISMATCH_MARKS = (
+    "importing the numpy c-extensions failed",
+    "but seem incompatible",
+    "_multiarray_umath",
+)
+
+
+def _looks_like_a_version_mismatch(details: str) -> bool:
+    """Is this a .venv built by one Python and run by another?
+
+    A mismatch and a half-finished install both surface as an ImportError from
+    inside a dependency, and they need opposite advice: "run setup.bat again" is
+    wrong for a mismatch, because setup.bat leaves an existing .venv alone and
+    would change nothing.
+    """
+    low = details.lower()
+    return sum(mark in low for mark in _MISMATCH_MARKS) >= 2
+
+
 def main() -> None:
     try:
         from gui.app import main as gui_main
@@ -127,12 +149,25 @@ def main() -> None:
     except SystemExit:
         raise
     except Exception:
-        _show_error(
-            "Failed to start the GUI:",
-            details=traceback.format_exc(),
-            hint="Hint: run setup.bat again or check the dependencies "
-                 "(pip install -r requirements.txt).",
-        )
+        details = traceback.format_exc()
+        # Both hints are written out here rather than chosen inside a helper, so
+        # that they stay visible as literal _show_error(hint=...) arguments — the
+        # translation-coverage test finds keys by looking at those call sites, and
+        # a hint returned from a helper is one it cannot see.
+        if _looks_like_a_version_mismatch(details):
+            _show_error(
+                "Failed to start the GUI:", details=details,
+                hint="This .venv was built by a different Python than the one "
+                     "running it — which is what happens when the project folder "
+                     "is copied between computers with .venv inside. It cannot be "
+                     "copied: it records the path of the Python that made it and "
+                     "holds binaries compiled for that exact version. Delete the "
+                     ".venv folder and run setup.bat on this computer.")
+        else:
+            _show_error(
+                "Failed to start the GUI:", details=details,
+                hint="Hint: run setup.bat again or check the dependencies "
+                     "(pip install -r requirements.txt).")
         sys.exit(1)
 
 

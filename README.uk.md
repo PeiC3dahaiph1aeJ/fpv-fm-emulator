@@ -18,7 +18,7 @@
 
 ## Завантаження (без git і терміналу)
 
-1. **[⬇ Завантажити ZIP — v0.5.0](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/tags/v0.5.0.zip)** — версія з
+1. **[⬇ Завантажити ZIP — v0.5.1](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/tags/v0.5.1.zip)** — версія з
    тегом, яку описує цей README, і саме її варто назвати, якщо щось піде не так.
    ([усі версії](https://github.com/Zapadenec1982/fpv-fm-emulator/tags) · [рухома вершина `main`](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/heads/main.zip),
    яка змінюється між релізами.)
@@ -28,7 +28,14 @@
 
 **Потрібен Python 3.9+** — якщо ще немає, встановіть з
 [python.org](https://www.python.org/downloads/) і **обов'язково відзначте
-«Add python.exe to PATH»** у першому вікні інсталятора.
+«Add python.exe to PATH»** у першому вікні інсталятора. Розробка йде на 3.11; для
+Python, що вийшов кілька місяців тому, часто ще немає готових пакетів numpy і
+PySide6 — `setup.bat` про це скаже, а безпечний вибір це 3.11 або 3.12.
+
+> **Не копіюйте `.venv` між компʼютерами.** Воно памʼятає шлях до Python, який його
+> створив, і містить бінарники саме під ту версію, тож на іншій машині падає
+> всередині numpy. Копіюйте папку проєкту без нього (або видаліть) і запустіть
+> `setup.bat` там.
 
 Якщо користуєтесь git:
 ```bash

@@ -15,6 +15,28 @@ error dialog, at the top of `probe`, and via `--version`.
 
 ---
 
+## 0.5.1 — 2026-08-10
+
+### Fixed
+- **A `.venv` copied from another computer now says so.** Moving the project folder
+  to a second PC with `.venv` inside gave a forty-line numpy C-extension traceback
+  ending in `No module named 'numpy._core._multiarray_umath'` — which reads as a
+  broken program, not a mismatched environment. It cannot be copied: it records the
+  path of the Python that built it and holds binaries compiled for that exact
+  version.
+  - `run_gui.bat` now imports numpy as well as PySide6. PySide6 ships stable-ABI
+    wheels that import under any Python, so the old check passed and let the GUI
+    start and then die inside numpy.
+  - `setup.bat` rebuilds a `.venv` whose numpy does not import. `python -m venv`
+    leaves an existing directory alone, so running setup again would have changed
+    nothing — the advice everyone gives first.
+  - The startup dialog recognises the mismatch and says to delete `.venv`, instead
+    of the generic "run setup.bat again" that is wrong in this exact case.
+- Both READMEs say not to copy `.venv`, and that a Python released in the last few
+  months often has no numpy or PySide6 wheels yet.
+
+---
+
 ## 0.5.0 — 2026-08-10
 
 Found by an adversarial review of the claim that a hard-coded 20 MHz transmit

@@ -16,6 +16,18 @@ if errorlevel 1 (
     exit /b 1
 )
 
+rem A .venv that came with the folder from another machine is worse than none: its
+rem binaries are compiled for one exact Python, and `python -m venv` leaves an
+rem existing directory alone, so the mismatch would survive this script.
+if exist ".venv\Scripts\python.exe" (
+    ".venv\Scripts\python.exe" -c "import numpy" >nul 2>nul
+    if errorlevel 1 (
+        echo [i] The existing .venv does not work with its Python - rebuilding it.
+        echo     ^(That is what a .venv copied from another computer looks like.^)
+        rmdir /s /q .venv
+    )
+)
+
 echo [1/4] Creating the .venv environment ...
 python -m venv .venv
 if errorlevel 1 (
