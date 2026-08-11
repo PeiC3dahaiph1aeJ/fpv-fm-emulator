@@ -1,0 +1,12 @@
+# Batch files must reach Windows with CRLF and as pure ASCII.
+# A GitHub ZIP hands out exactly what the repository stores, so a .bat kept with
+# LF endings is downloaded with LF endings, and cmd.exe mis-parses it.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Everything else: normalise in the repository, check out native.
+* text=auto
+*.png binary
+*.jpg binary
+*.iq binary
+*.npy binary

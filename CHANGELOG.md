@@ -15,6 +15,27 @@ error dialog, at the top of `probe`, and via `--version`.
 
 ---
 
+## 0.5.2 — 2026-08-10
+
+### Fixed
+- **`setup.bat` destroyed itself on a machine where it had never run.** It printed
+  `'ho' is not recognized`, `'errorlevel' is not recognized` and so on, then gave up.
+  cmd.exe tracks its position in a batch file by BYTE offset, and under `chcp 65001`
+  a multi-byte character makes it resume two bytes late on every following line —
+  so `echo` was read as `ho`. The file contained three em dashes. Both launchers are
+  pure ASCII now, and a test enforces it.
+- **`.bat` files are pinned to CRLF** via `.gitattributes`. A GitHub ZIP hands out
+  exactly what the repository stores, and these were stored with LF — which cmd.exe
+  also mis-parses. Nobody saw it because on a `git clone` they are converted on
+  checkout; the ZIP download the README recommends does not do that.
+- **`setup.bat` finds a Python that is not on the PATH.** It falls back to the `py`
+  launcher, which the python.org installer always provides — "Add python.exe to
+  PATH" is the box people miss, and it is exactly how a machine ends up with Python
+  installed and setup unable to find it. It also prints which interpreter it used,
+  and says that 3.11 or 3.12 is the safe choice.
+
+---
+
 ## 0.5.1 — 2026-08-10
 
 ### Fixed

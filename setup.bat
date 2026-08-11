@@ -1,24 +1,49 @@
 @echo off
+rem ---------------------------------------------------------------------------
+rem  Keep this file pure ASCII. cmd.exe tracks its position in a batch file by
+rem  BYTE offset, and under `chcp 65001` a multi-byte character makes it resume
+rem  two bytes late on the following lines -- "echo" is read as "ho" and every
+rem  command after it fails with "is not recognized". This file used to contain
+rem  em dashes and did exactly that on a machine where it had never been run.
+rem  A test in tests/test_launchers.py enforces it.
+rem ---------------------------------------------------------------------------
 chcp 65001 >nul
 cd /d "%~dp0"
-title FPV FM emulator — setup
+title FPV FM emulator - setup
 echo ============================================================
-echo   FPV FM emulator — setup (run once)
+echo   FPV FM emulator - setup (run once)
 echo ============================================================
 echo.
 
-where python >nul 2>nul
-if errorlevel 1 (
-    echo [!] Python not found in PATH.
-    echo     Install Python 3.9+ from python.org and tick "Add to PATH".
+rem `python` is not the only way in: the python.org installer always provides the
+rem `py` launcher, and it works even when "Add to PATH" was left unticked - which
+rem is the usual reason this script cannot find an interpreter that is installed.
+set "PY_CMD="
+where python >nul 2>nul && set "PY_CMD=python"
+if not defined PY_CMD where py >nul 2>nul && set "PY_CMD=py -3"
+
+if not defined PY_CMD (
+    echo [!] No Python found.
+    echo.
+    echo     Neither "python" nor the "py" launcher is available here.
+    echo     Install Python from python.org and tick "Add python.exe to PATH"
+    echo     in the FIRST installer window.
+    echo.
+    echo     Python 3.11 or 3.12 is the safe choice. A version released in the
+    echo     last few months often has no numpy or PySide6 packages yet, and the
+    echo     install below would fail.
     echo.
     pause
     exit /b 1
 )
+echo [i] Using: %PY_CMD%
+%PY_CMD% --version
 
-rem A .venv that came with the folder from another machine is worse than none: its
-rem binaries are compiled for one exact Python, and `python -m venv` leaves an
-rem existing directory alone, so the mismatch would survive this script.
+rem A .venv that arrived with the folder from another machine is worse than none:
+rem its binaries are compiled for one exact Python and it records the path of the
+rem interpreter that built it. `python -m venv` leaves an existing directory
+rem alone, so the mismatch would survive this script and running setup again -
+rem the first thing anyone tries - would change nothing.
 if exist ".venv\Scripts\python.exe" (
     ".venv\Scripts\python.exe" -c "import numpy" >nul 2>nul
     if errorlevel 1 (
@@ -29,7 +54,7 @@ if exist ".venv\Scripts\python.exe" (
 )
 
 echo [1/4] Creating the .venv environment ...
-python -m venv .venv
+%PY_CMD% -m venv .venv
 if errorlevel 1 (
     echo [!] Failed to create .venv
     pause
@@ -46,7 +71,8 @@ if errorlevel 1 (
     echo [!] Dependency installation FAILED - see the errors above.
     echo     Nothing was installed: pip aborts the whole requirements file when a
     echo     single entry cannot be resolved. The GUI will not start like this.
-    echo     Fix the error - usually an unsupported Python version - and run setup.bat again.
+    echo     The usual cause is a Python too new to have numpy/PySide6 packages -
+    echo     install 3.11 or 3.12 and run setup.bat again.
     echo.
     pause
     exit /b 1
@@ -67,6 +93,6 @@ echo ============================================================
 echo   Done. Start the GUI by double-clicking run_gui.bat
 echo ============================================================
 echo.
-echo   (SoapySDR for HackRF/Lime — separately, see requirements-hw.txt)
+echo   (SoapySDR for HackRF/Lime - separately, see requirements-hw.txt)
 echo.
 pause

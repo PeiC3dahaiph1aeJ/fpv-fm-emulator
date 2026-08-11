@@ -18,7 +18,7 @@
 
 ## Завантаження (без git і терміналу)
 
-1. **[⬇ Завантажити ZIP — v0.5.1](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/tags/v0.5.1.zip)** — версія з
+1. **[⬇ Завантажити ZIP — v0.5.2](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/tags/v0.5.2.zip)** — версія з
    тегом, яку описує цей README, і саме її варто назвати, якщо щось піде не так.
    ([усі версії](https://github.com/Zapadenec1982/fpv-fm-emulator/tags) · [рухома вершина `main`](https://github.com/Zapadenec1982/fpv-fm-emulator/archive/refs/heads/main.zip),
    яка змінюється між релізами.)
@@ -86,7 +86,7 @@ config/
   scenarios/*.yaml приклади сценаріїв
 scripts/probe_pluto.py   автономна проба апаратури
 CHANGELOG.md      що змінилось у кожній версії
-tests/            офлайн-тести ядра (pytest, 174 шт.)
+tests/            офлайн-тести ядра (pytest, 181 шт.)
 ```
 
 ---
@@ -318,7 +318,7 @@ python -m fpv_emulator.cli tx --backend soapy --device driver=lime --scenario sw
 ```bash
 python -m pytest tests/ -q
 ```
-174 офлайн-тести, апаратура не потрібна. Покривають: пошук бендів/каналів (зокрема
+181 офлайн-тест, апаратура не потрібна. Покривають: пошук бендів/каналів (зокрема
 неоднозначні «голі» імена), guard за межами HW, таймінг і рівні композитного відео,
 кольоровий тракт (піднесуча, розміщення burst, чергування фази V у PAL), інваріанти
 ЧМ і неперервність стику циклічного буфера, сумування мультидрону та рознесення його
